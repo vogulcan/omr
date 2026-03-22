@@ -429,14 +429,6 @@ def _bubble_patch(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Grade a filled OMR sheet PDF or a folder of PDFs.")
     parser.add_argument("path", help="Path to a filled OMR sheet PDF or a directory containing PDF files.")
-    parser.add_argument(
-        "--output",
-        help="Optional annotated PDF output path. For folder input, this must be a directory path.",
-    )
-    parser.add_argument(
-        "--correct-answers",
-        help="Optional answer key as inline JSON or a path to a JSON file. Correct answers are watermarked in faint red.",
-    )
     return parser
 
 
@@ -444,11 +436,7 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     try:
-        correct_answers = _load_correct_answers(args.correct_answers)
-    except ValueError as exc:
-        parser.error(str(exc))
-    try:
-        result = grade_path(args.path, output_path=args.output, correct_answers=correct_answers)
+        result = grade_path(args.path)
     except UnsupportedSheetError as exc:
         parser.exit(2, f"{exc}\n")
     if isinstance(result, list):

@@ -1,32 +1,12 @@
 # OMR Sheet Generator
 
-`omr` generates marker-based OMR sheets as PDF files.
-`omr-grade` reads filled sheets and returns JSON.
-`omr-annotate` writes annotated PDFs with grading metadata and optional answer-key overlays.
+This project provides three separate entry points:
 
-## What It Does
+- `omr`: generate a blank OMR sheet PDF
+- `omr-grade`: read filled sheet PDFs and return JSON
+- `omr-annotate`: write annotated PDFs using grading results and an optional answer key
 
-Generated sheets have:
-
-- A4 portrait layout
-- 4 corner registration markers
-- 2 local answer-area registration markers
-- a 5-digit student ID block
-- question columns with at most `10` questions per column
-- `2` to `5` options per question
-- a QR code containing `examSetId` and `variantId`
-
-Grading returns:
-
-- QR data
-- student ID
-- marked answers
-- per-file error text when grading fails
-
-Annotation writes:
-
-- a copy of the original PDF with red watermark text below the QR
-- optional faint red correct-answer overlays on detected question rows
+It also exposes matching Python APIs.
 
 ## Requirements
 
@@ -40,7 +20,7 @@ Annotation writes:
 uv sync
 ```
 
-Useful help commands:
+CLI help:
 
 ```bash
 uv run omr --help
@@ -48,16 +28,29 @@ uv run omr-grade --help
 uv run omr-annotate --help
 ```
 
-## Typical Workflow
+## Sheet Layout
 
-1. Generate a blank sheet.
-2. Print and fill it.
-3. Grade the filled PDF to JSON.
-4. Optionally annotate the filled PDF for review.
+Generated sheets are:
 
-## Generate a Sheet
+- A4 portrait
+- marker-based for registration
+- 5-digit student ID
+- question columns with at most `10` questions per column
+- `2` to `5` answer options per question
+- QR-backed with `examSetId` and `variantId`
 
-Minimal example:
+The QR payload format is:
+
+```json
+{
+  "examSetId": "f6adcc63-71dc-412c-9c8d-a4609df454ff",
+  "variantId": "37e3d65f-e540-4e34-b438-549e731be3b0"
+}
+```
+
+## CLI Usage
+
+### 1. Generate a Blank Sheet
 
 ```bash
 uv run omr \
@@ -72,54 +65,31 @@ With custom title and instructions:
 ```bash
 uv run omr \
   --questions 4,4,4,4,5,5,3,2 \
-  --exam-set-id f6adcc63-71dc-412c-9c8d-a4609df454ff \
-  --variant-id 37e3d65f-e540-4e34-b438-549e731be3b0 \
+  --exam-set-id exam-set-001 \
+  --variant-id variant-a \
   --output exam-a.pdf \
   --title "Midterm Exam A" \
   --instructions "Fill bubbles completely. Use a dark pencil."
 ```
 
-### Generation Inputs
+Arguments:
 
-- `--questions`
-  - required
-  - comma-separated integers
-  - each value must be between `2` and `5`
-- `--exam-set-id`
-  - required
-  - encoded into the QR payload
-- `--variant-id`
-  - required
-  - encoded into the QR payload
-- `--output`
-  - optional
-  - defaults to `omr-sheet.pdf`
-- `--title`
-  - optional
-- `--instructions`
-  - optional
-  - default is `Fill bubbles completely.`
+- `--questions`: required comma-separated option counts like `4,4,5,3`
+- `--exam-set-id`: required
+- `--variant-id`: required
+- `--output`: optional, defaults to `omr-sheet.pdf`
+- `--title`: optional
+- `--instructions`: optional, defaults to `Fill bubbles completely.`
 
-### Question Layout Rules
+Rules:
 
-- questions are numbered starting at `1`
-- each column holds at most `10` questions
-- each question has `2` to `5` bubbles
-- option labels are `A` through `E`
-- if the sheet needs more space, new pages are added
+- each question count must be between `2` and `5`
+- questions are numbered from `1`
+- each question column holds at most `10` rows
+- extra questions spill onto new pages
+- the final sheet does not include page numbering
 
-### QR Payload Format
-
-The QR code contains JSON in this form:
-
-```json
-{
-  "examSetId": "f6adcc63-71dc-412c-9c8d-a4609df454ff",
-  "variantId": "37e3d65f-e540-4e34-b438-549e731be3b0"
-}
-```
-
-## Grade a Filled Sheet
+### 2. Grade a Filled Sheet
 
 Single PDF:
 
@@ -127,19 +97,206 @@ Single PDF:
 uv run omr-grade filled-sheet.pdf
 ```
 
-Folder of PDFs:
+Directory of PDFs:
 
 ```bash
 uv run omr-grade filled-sheets/
 ```
 
-`omr-grade` prints JSON only. It does not write annotated PDFs.
+`omr-grade` prints JSON only. It does not write PDFs.
 
-## `omr-grade` Output
+### 3. Annotate a Filled Sheet
 
-### Single PDF Output
+Single PDF:
 
-Example:
+```bash
+uv run omr-annotate filled-sheet.pdf --output annotated.pdf
+```
+
+Directory of PDFs:
+
+```bash
+uv run omr-annotate filled-sheets/ --output reviewed/
+```
+
+With an answer key from a file:
+
+```bash
+uv run omr-annotate filled-sheet.pdf \
+  --output annotated.pdf \
+  --correct-answers tests/answer-key.json
+```
+
+With an inline answer key:
+
+```bash
+uv run omr-annotate filled-sheet.pdf \
+  --output annotated.pdf \
+  --correct-answers '{"1":["D"],"3":["B","C"]}'
+```
+
+Arguments:
+
+- `path`: required PDF or directory of PDFs
+- `--output`: required output PDF path or directory
+- `--correct-answers`: optional JSON string or JSON file path
+
+Output path behavior:
+
+- for a single input PDF:
+  - if `--output` ends with `.pdf`, that exact file is written
+  - otherwise it is treated as a directory and `<source>-annotated.pdf` is written inside it
+- for a directory input:
+  - `--output` is treated as a directory
+  - each input file produces `<source-stem>-annotated.pdf`
+
+## Python API
+
+The package exports:
+
+```python
+from omr import (
+    SheetConfig,
+    generate_omr_sheet,
+    grade_pdf,
+    grade_path,
+    grade_directory,
+    annotate_pdf,
+    annotate_path,
+    annotate_directory,
+)
+```
+
+### Generate a Sheet
+
+```python
+from omr import SheetConfig, generate_omr_sheet
+
+config = SheetConfig(
+    question_option_counts=[4, 4, 5, 3, 2, 5],
+    exam_set_id="f6adcc63-71dc-412c-9c8d-a4609df454ff",
+    variant_id="37e3d65f-e540-4e34-b438-549e731be3b0",
+    title="Optical Mark Recognition Sheet",
+    instructions="Fill bubbles completely.",
+)
+
+generate_omr_sheet(config, "omr-sheet.pdf")
+```
+
+`generate_omr_sheet(config, destination)` accepts:
+
+- `config`: `SheetConfig`
+- `destination`: file path or binary output stream
+
+### Grade One PDF
+
+```python
+from omr import grade_pdf
+
+result = grade_pdf("filled-sheet.pdf")
+
+print(result.qr_data)
+print(result.student_id)
+print(result.marked_answers)
+print(result.omr_error)
+```
+
+Return type: `GradeResult`
+
+Fields:
+
+- `qr_data: dict | str | None`
+- `student_id: str`
+- `marked_answers: dict[str, list[str]]`
+- `omr_error: str`
+
+### Grade a Directory
+
+```python
+from omr import grade_directory
+
+results = grade_directory("filled-sheets")
+for result in results:
+    print(result.source_pdf, result.student_id, result.omr_error)
+```
+
+Return type: `list[BatchGradeResult]`
+
+Fields per item:
+
+- `source_pdf: str`
+- `qr_data: dict | str | None`
+- `student_id: str`
+- `marked_answers: dict[str, list[str]]`
+- `omr_error: str`
+
+Batch grading behavior:
+
+- only `.pdf` files are processed
+- failures do not abort the batch
+- failed files still return one result entry
+- failed entries use:
+  - `qr_data = None`
+  - `student_id = ""`
+  - `marked_answers = {}`
+  - `omr_error = "<message>"`
+
+### Annotate One PDF
+
+```python
+from omr import annotate_pdf
+
+result = annotate_pdf(
+    "filled-sheet.pdf",
+    "annotated.pdf",
+    correct_answers={
+        "1": ["D"],
+        "3": ["B", "C"],
+    },
+)
+
+print(result.annotated_pdf)
+```
+
+Return type: `AnnotateResult`
+
+Fields:
+
+- `qr_data: dict | str | None`
+- `student_id: str`
+- `marked_answers: dict[str, list[str]]`
+- `omr_error: str`
+- `annotated_pdf: str`
+
+### Annotate a Directory
+
+```python
+from omr import annotate_directory
+
+results = annotate_directory(
+    "filled-sheets",
+    "reviewed",
+    correct_answers={"1": ["D"]},
+)
+
+for result in results:
+    print(result.source_pdf, result.annotated_pdf)
+```
+
+Return type: `list[BatchAnnotateResult]`
+
+Fields per item:
+
+- `source_pdf: str`
+- `qr_data: dict | str | None`
+- `student_id: str`
+- `marked_answers: dict[str, list[str]]`
+- `omr_error: str`
+- `annotated_pdf: str`
+
+## JSON Output
+
+### `omr-grade` Single PDF
 
 ```json
 {
@@ -160,43 +317,7 @@ Example:
 }
 ```
 
-Field meanings:
-
-- `qr_data`
-  - decoded QR payload
-  - usually an object with `examSetId` and `variantId`
-  - may be `null` if QR decoding fails
-- `student_id`
-  - 5-digit student number
-- `marked_answers`
-  - object keyed by question number as strings
-  - each value is a list of selected options
-  - multiple answers are allowed
-- `omr_error`
-  - empty string on success
-
-### `marked_answers` Schema
-
-Example:
-
-```json
-{
-  "1": ["B"],
-  "2": ["B", "D"],
-  "3": []
-}
-```
-
-Rules:
-
-- keys are question numbers as strings
-- values are arrays of option labels
-- multiple marked choices are supported
-- unanswered detected rows produce an empty array
-
-### Folder Output
-
-When the input is a directory, the output is a JSON array:
+### `omr-grade` Directory
 
 ```json
 [
@@ -222,50 +343,7 @@ When the input is a directory, the output is a JSON array:
 ]
 ```
 
-Directory behavior:
-
-- only `.pdf` files are processed
-- grading continues even if one file fails
-- failed files still get a JSON result entry
-- failed entries have:
-  - `qr_data: null`
-  - `student_id: ""`
-  - `marked_answers: {}`
-  - `omr_error` populated
-
-## Annotate a Filled Sheet
-
-Single PDF:
-
-```bash
-uv run omr-annotate filled-sheet.pdf --output annotated.pdf
-```
-
-Directory:
-
-```bash
-uv run omr-annotate filled-sheets/ --output graded-pdfs/
-```
-
-With an answer key:
-
-```bash
-uv run omr-annotate filled-sheet.pdf \
-  --output annotated.pdf \
-  --correct-answers tests/answer-key.json
-```
-
-Inline answer-key JSON also works:
-
-```bash
-uv run omr-annotate filled-sheet.pdf \
-  --output annotated.pdf \
-  --correct-answers '{"1":["D"],"3":["B","C"]}'
-```
-
-## `omr-annotate` Output
-
-Single-file example:
+### `omr-annotate` Single PDF
 
 ```json
 {
@@ -282,44 +360,25 @@ Single-file example:
 }
 ```
 
-Additional field:
+### `marked_answers` Shape
 
-- `annotated_pdf`
-  - path of the written annotated PDF
+```json
+{
+  "1": ["B"],
+  "2": ["B", "D"],
+  "3": []
+}
+```
 
-### Annotation Behavior
+Rules:
 
-The annotation overlay includes:
+- keys are question numbers as strings
+- values are arrays of selected option labels
+- multiple marked choices are allowed
 
-- `Student ID: ...`
-- the raw `examSetId`
-- the raw `variantId`
-- red watermark text below the QR area
-- `OMR Error: ...` for failed files
-- optional faint red correct-answer overlays
+## Correct Answer JSON
 
-Correct-answer overlays are only drawn for question rows actually detected on the sheet. Extra keys in the answer key are ignored for non-existent rows.
-
-### Output Path Rules
-
-For a single input PDF:
-
-- if `--output` ends with `.pdf`, that exact file is written
-- otherwise `--output` is treated as a directory and `<source-stem>-annotated.pdf` is created inside it
-
-For a directory input:
-
-- `--output` is treated as a directory
-- each source PDF gets `<source-stem>-annotated.pdf`
-
-## Correct Answer JSON Format
-
-`--correct-answers` accepts either:
-
-- a JSON string
-- or a path to a JSON file
-
-Supported format:
+Accepted formats:
 
 ```json
 {
@@ -329,7 +388,7 @@ Supported format:
 }
 ```
 
-Also supported:
+or:
 
 ```json
 {
@@ -343,17 +402,14 @@ Also supported:
 Rules:
 
 - question keys may be strings or numbers
-- values may be:
-  - a string like `"D"`
-  - or a list like `["B", "D"]`
+- values may be a string or a list of strings
 - labels are normalized to uppercase
-- labels should be `A` through `E`
-- the answer key affects annotation only
-- it does not change grading results
+- supported labels are `A` through `E`
+- answer keys affect annotation only, not grading
 
 ## Practical Examples
 
-### Generate, Grade, Annotate One Sheet
+### Full Flow
 
 ```bash
 uv run omr \
@@ -362,7 +418,7 @@ uv run omr \
   --variant-id variant-a \
   --output sheet.pdf
 
-uv run omr-grade sheet-filled.pdf
+uv run omr-grade sheet-filled.pdf > result.json
 
 uv run omr-annotate \
   sheet-filled.pdf \
@@ -370,41 +426,31 @@ uv run omr-annotate \
   --correct-answers tests/answer-key.json
 ```
 
-### Grade a Folder and Keep Going on Errors
-
-```bash
-uv run omr-grade scans/
-```
-
-If one file is bad, the command still returns JSON entries for the rest.
-
-### Annotate a Folder for Manual Review
-
-```bash
-uv run omr-annotate scans/ --output reviewed/
-```
-
-### Pipe Grading Output to a File
+### Batch Grade
 
 ```bash
 uv run omr-grade scans/ > results.json
 ```
 
+### Batch Annotate
+
+```bash
+uv run omr-annotate scans/ --output reviewed/
+```
+
 ## Limitations
 
 - grading requires the current marker-based sheet format
-- grading currently reads only the first page of each PDF
+- grading reads only the first page of each PDF
 - student ID is fixed to 5 digits
 - option labels are limited to `A-E`
-- registration is marker-first
-- QR is used for payload extraction, not as the primary geometric anchor
+- geometric registration is marker-first
+- QR is used for payload extraction, not for primary alignment
 
-## Testing
-
-Run the full test suite:
+## Tests
 
 ```bash
 uv run --with pytest pytest -q
 ```
 
-Tests generate their PDF fixtures dynamically and clean them up automatically. No checked-in graded sample PDFs are required.
+Tests generate PDF fixtures dynamically and clean them up automatically.
