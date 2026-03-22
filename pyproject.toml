@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omr"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0.0",
+    "opencv-python-headless>=4.11.0.86",
+    "reportlab>=4.4.0",
+    "segno>=1.6.6",
+]
+
+[project.scripts]
+omr = "omr.cli:main"
+omr-grade = "omr.grade:main"
+
+[tool.setuptools.packages.find]
+include = ["omr*"]
