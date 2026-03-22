@@ -11,6 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.0.0",
     "opencv-python-headless>=4.11.0.86",
+    "pypdf>=5.3.1",
     "reportlab>=4.4.0",
     "segno>=1.6.6",
 ]
@@ -18,6 +19,7 @@ dependencies = [
 [project.scripts]
 omr = "omr.cli:main"
 omr-grade = "omr.grade:main"
+omr-annotate = "omr.annotate:main"
 
 [tool.setuptools.packages.find]
 include = ["omr*"]

@@ -40,7 +40,10 @@ class BatchGradeResult:
     omr_error: str
 
 
-def grade_pdf(pdf_path: str | Path, layout: PageLayout | None = None) -> GradeResult:
+def grade_pdf(
+    pdf_path: str | Path,
+    layout: PageLayout | None = None,
+) -> GradeResult:
     layout = layout or PageLayout()
     pdf_path = Path(pdf_path)
     image = _rasterize_pdf_page(pdf_path)
@@ -52,17 +55,28 @@ def grade_pdf(pdf_path: str | Path, layout: PageLayout | None = None) -> GradeRe
     answer_binary = _threshold_image(answer_aligned_image)
     student_id = _grade_student_id(page_binary, layout)
     marked_answers = _grade_answers(answer_binary, layout)
-    return GradeResult(qr_data=qr_data, student_id=student_id, marked_answers=marked_answers, omr_error="")
+    return GradeResult(
+        qr_data=qr_data,
+        student_id=student_id,
+        marked_answers=marked_answers,
+        omr_error="",
+    )
 
 
-def grade_path(path: str | Path, layout: PageLayout | None = None) -> GradeResult | list[BatchGradeResult]:
+def grade_path(
+    path: str | Path,
+    layout: PageLayout | None = None,
+) -> GradeResult | list[BatchGradeResult]:
     target = Path(path)
     if target.is_dir():
         return grade_directory(target, layout=layout)
     return grade_pdf(target, layout=layout)
 
 
-def grade_directory(directory: str | Path, layout: PageLayout | None = None) -> list[BatchGradeResult]:
+def grade_directory(
+    directory: str | Path,
+    layout: PageLayout | None = None,
+) -> list[BatchGradeResult]:
     target_dir = Path(directory)
     pdf_paths = sorted(path for path in target_dir.iterdir() if path.is_file() and path.suffix.lower() == ".pdf")
     results: list[BatchGradeResult] = []
@@ -415,6 +429,14 @@ def _bubble_patch(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Grade a filled OMR sheet PDF or a folder of PDFs.")
     parser.add_argument("path", help="Path to a filled OMR sheet PDF or a directory containing PDF files.")
+    parser.add_argument(
+        "--output",
+        help="Optional annotated PDF output path. For folder input, this must be a directory path.",
+    )
+    parser.add_argument(
+        "--correct-answers",
+        help="Optional answer key as inline JSON or a path to a JSON file. Correct answers are watermarked in faint red.",
+    )
     return parser
 
 
@@ -422,7 +444,11 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     try:
-        result = grade_path(args.path)
+        correct_answers = _load_correct_answers(args.correct_answers)
+    except ValueError as exc:
+        parser.error(str(exc))
+    try:
+        result = grade_path(args.path, output_path=args.output, correct_answers=correct_answers)
     except UnsupportedSheetError as exc:
         parser.exit(2, f"{exc}\n")
     if isinstance(result, list):

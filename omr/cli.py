@@ -15,6 +15,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated option counts for each question, for example: 4,4,5,3",
     )
     parser.add_argument(
+        "--exam-set-id",
+        required=True,
+        help="Exam set identifier encoded into the QR payload.",
+    )
+    parser.add_argument(
+        "--variant-id",
+        required=True,
+        help="Variant identifier encoded into the QR payload.",
+    )
+    parser.add_argument(
         "--output",
         default="omr-sheet.pdf",
         help="Destination PDF path. Defaults to omr-sheet.pdf",
@@ -50,6 +60,8 @@ def main() -> None:
     try:
         config = SheetConfig(
             question_option_counts=parse_question_counts(args.questions),
+            exam_set_id=args.exam_set_id,
+            variant_id=args.variant_id,
             title=args.title,
             instructions=args.instructions,
         )

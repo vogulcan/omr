@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
 import re
-from pathlib import Path
 import shutil
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
+from pypdf import PdfReader
 
 from omr.cli import parse_question_counts
+from omr.annotate import annotate_directory, annotate_pdf, load_correct_answers
 from omr.grade import (
     UnsupportedSheetError,
     _detect_answer_marker_centers,
@@ -21,26 +26,39 @@ from omr.generator import DUMMY_QR_DATA, dummy_qr_payload, generate_omr_sheet
 from omr.layout import OPTION_LABELS, STUDENT_ID_COLUMNS, STUDENT_ID_ROWS, PageLayout, paginate_questions
 from omr.models import SheetConfig
 
-SAMPLE_ANSWERED_PDF = Path(__file__).resolve().parents[1] / "answered-sheets" / "omr-sheet-answered.pdf"
-ANSWER1_PDF = Path(__file__).resolve().parents[1] / "answered-sheets" / "answer1.pdf"
-UNSUPPORTED_MARKERLESS_PDF = Path(__file__).resolve().parents[1] / "answered-sheets" / "omr-sheet-answered2.pdf"
-ROTATED_ANSWERED_PDF = Path(__file__).resolve().parents[1] / "answered-sheets" / "omr-sheet-answered5.pdf"
-TRANSLATED_ANSWERED_PDF = Path(__file__).resolve().parents[1] / "answered-sheets" / "omr-sheet-answered6.pdf"
+ROOT = Path(__file__).resolve().parents[1]
+ANSWER_KEY_JSON = Path(__file__).resolve().parent / "answer-key.json"
+TEST_EXAM_SET_ID = "11111111-2222-3333-4444-555555555555"
+TEST_VARIANT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
 def test_config_rejects_empty_question_list() -> None:
     with pytest.raises(ValueError, match="must not be empty"):
-        SheetConfig(question_option_counts=[])
+        SheetConfig(question_option_counts=[], exam_set_id=TEST_EXAM_SET_ID, variant_id=TEST_VARIANT_ID)
+
+
+@pytest.mark.parametrize(("exam_set_id", "variant_id"), [("", TEST_VARIANT_ID), (TEST_EXAM_SET_ID, "")])
+def test_config_rejects_empty_qr_ids(exam_set_id: str, variant_id: str) -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        SheetConfig(question_option_counts=[4, 4], exam_set_id=exam_set_id, variant_id=variant_id)
 
 
 @pytest.mark.parametrize("invalid_count", [0, 1, 6])
 def test_config_rejects_invalid_question_option_counts(invalid_count: int) -> None:
     with pytest.raises(ValueError, match="between 2 and 5"):
-        SheetConfig(question_option_counts=[4, invalid_count, 5])
+        SheetConfig(
+            question_option_counts=[4, invalid_count, 5],
+            exam_set_id=TEST_EXAM_SET_ID,
+            variant_id=TEST_VARIANT_ID,
+        )
 
 
 def test_config_accepts_mixed_valid_counts() -> None:
-    config = SheetConfig(question_option_counts=[2, 3, 4, 5])
+    config = SheetConfig(
+        question_option_counts=[2, 3, 4, 5],
+        exam_set_id=TEST_EXAM_SET_ID,
+        variant_id=TEST_VARIANT_ID,
+    )
     assert config.question_option_counts == [2, 3, 4, 5]
 
 
@@ -53,7 +71,11 @@ def test_student_id_area_dimensions_are_fixed() -> None:
 
 
 def test_question_pagination_caps_at_ten_rows_per_column() -> None:
-    config = SheetConfig(question_option_counts=[4] * 12)
+    config = SheetConfig(
+        question_option_counts=[4] * 12,
+        exam_set_id=TEST_EXAM_SET_ID,
+        variant_id=TEST_VARIANT_ID,
+    )
     pages = paginate_questions(config)
 
     assert len(pages) == 1
@@ -65,7 +87,11 @@ def test_question_pagination_caps_at_ten_rows_per_column() -> None:
 
 def test_question_option_labels_match_choice_count() -> None:
     counts = [2, 3, 4, 5]
-    config = SheetConfig(question_option_counts=counts)
+    config = SheetConfig(
+        question_option_counts=counts,
+        exam_set_id=TEST_EXAM_SET_ID,
+        variant_id=TEST_VARIANT_ID,
+    )
     page = paginate_questions(config)[0]
 
     for placement, expected_count in zip(page, counts, strict=True):
@@ -75,7 +101,11 @@ def test_question_option_labels_match_choice_count() -> None:
 
 def test_pagination_occurs_when_page_capacity_is_exceeded() -> None:
     layout = PageLayout()
-    config = SheetConfig(question_option_counts=[5] * (layout.questions_per_page + 1))
+    config = SheetConfig(
+        question_option_counts=[5] * (layout.questions_per_page + 1),
+        exam_set_id=TEST_EXAM_SET_ID,
+        variant_id=TEST_VARIANT_ID,
+    )
     pages = paginate_questions(config, layout)
 
     assert len(pages) == 2
@@ -88,17 +118,28 @@ def test_parse_question_counts() -> None:
 
 
 def test_dummy_qr_payload_is_expected_json() -> None:
-    assert dummy_qr_payload() == (
+    assert dummy_qr_payload(
+        SheetConfig(
+            question_option_counts=[4],
+            exam_set_id=DUMMY_QR_DATA["examSetId"],
+            variant_id=DUMMY_QR_DATA["variantId"],
+        )
+    ) == (
         '{"examSetId":"f6adcc63-71dc-412c-9c8d-a4609df454ff",'
         '"variantId":"37e3d65f-e540-4e34-b438-549e731be3b0"}'
     )
-    assert DUMMY_QR_DATA["examSetId"]
-    assert DUMMY_QR_DATA["variantId"]
 
 
-def test_generate_single_page_pdf(tmp_path: Path) -> None:
-    target = tmp_path / "single-page.pdf"
-    generate_omr_sheet(SheetConfig(question_option_counts=[4] * 20), target)
+def test_generate_single_page_pdf(generated_tmp_dir: Path) -> None:
+    target = generated_tmp_dir / "single-page.pdf"
+    generate_omr_sheet(
+        SheetConfig(
+            question_option_counts=[4] * 20,
+            exam_set_id=TEST_EXAM_SET_ID,
+            variant_id=TEST_VARIANT_ID,
+        ),
+        target,
+    )
 
     data = target.read_bytes()
     assert target.exists()
@@ -107,10 +148,17 @@ def test_generate_single_page_pdf(tmp_path: Path) -> None:
     assert len(re.findall(rb"/Type /Page\b", data)) == 1
 
 
-def test_generated_sheet_contains_detectable_markers(tmp_path: Path) -> None:
-    target = tmp_path / "marker-sheet.pdf"
+def test_generated_sheet_contains_detectable_markers(generated_tmp_dir: Path) -> None:
+    target = generated_tmp_dir / "marker-sheet.pdf"
     layout = PageLayout()
-    generate_omr_sheet(SheetConfig(question_option_counts=[4] * 6), target)
+    generate_omr_sheet(
+        SheetConfig(
+            question_option_counts=[4] * 6,
+            exam_set_id=TEST_EXAM_SET_ID,
+            variant_id=TEST_VARIANT_ID,
+        ),
+        target,
+    )
 
     image = _rasterize_pdf_page(target)
     binary = _threshold_image(image)
@@ -135,23 +183,56 @@ def test_marker_geometry_does_not_overlap_layout_regions() -> None:
     assert right_marker[0] > layout.answer_option_center(layout.answer_columns_per_page - 1, 0, 4)[0]
 
 
-def test_generate_multi_page_pdf(tmp_path: Path) -> None:
+def test_generate_multi_page_pdf(generated_tmp_dir: Path) -> None:
     layout = PageLayout()
-    target = tmp_path / "multi-page.pdf"
-    generate_omr_sheet(SheetConfig(question_option_counts=[5] * (layout.questions_per_page + 7)), target)
+    target = generated_tmp_dir / "multi-page.pdf"
+    generate_omr_sheet(
+        SheetConfig(
+            question_option_counts=[5] * (layout.questions_per_page + 7),
+            exam_set_id=TEST_EXAM_SET_ID,
+            variant_id=TEST_VARIANT_ID,
+        ),
+        target,
+    )
 
     data = target.read_bytes()
     assert len(re.findall(rb"/Type /Page\b", data)) == 2
     assert b"Dummy QR code" not in data
 
 
-def test_grade_markerless_sheet_fails_cleanly() -> None:
+def test_generation_cli_writes_pdf(generated_tmp_dir: Path, cli_env: dict[str, str]) -> None:
+    output_pdf = generated_tmp_dir / "cli-sheet.pdf"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "main.py"),
+            "--questions",
+            "4,4,5,3",
+            "--exam-set-id",
+            TEST_EXAM_SET_ID,
+            "--variant-id",
+            TEST_VARIANT_ID,
+            "--output",
+            str(output_pdf),
+        ],
+        cwd=ROOT,
+        env=cli_env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout == ""
+    assert output_pdf.exists()
+
+
+def test_grade_markerless_sheet_fails_cleanly(sample_pdfs: dict[str, Path]) -> None:
     with pytest.raises(UnsupportedSheetError, match="alignment marker"):
-        grade_pdf(UNSUPPORTED_MARKERLESS_PDF)
+        grade_pdf(sample_pdfs["markerless"])
 
 
-def test_grade_answered_sample_pdf() -> None:
-    result = grade_pdf(SAMPLE_ANSWERED_PDF)
+def test_grade_answered_sample_pdf(sample_pdfs: dict[str, Path]) -> None:
+    result = grade_pdf(sample_pdfs["sample_answered"])
 
     assert result.qr_data == DUMMY_QR_DATA
     assert result.student_id == "63620"
@@ -166,9 +247,10 @@ def test_grade_answered_sample_pdf() -> None:
     }
 
 
-def test_grade_answer1_pdf() -> None:
-    result = grade_pdf(ANSWER1_PDF)
+def test_grade_answer1_pdf(sample_pdfs: dict[str, Path]) -> None:
+    result = grade_pdf(sample_pdfs["answer1"])
 
+    assert result.qr_data == DUMMY_QR_DATA
     assert result.student_id == "01345"
     assert result.omr_error == ""
     assert result.marked_answers == {
@@ -181,12 +263,12 @@ def test_grade_answer1_pdf() -> None:
     }
 
 
-def test_grade_directory_reads_all_pdfs(tmp_path: Path) -> None:
-    shutil.copy(SAMPLE_ANSWERED_PDF, tmp_path / "student-a.pdf")
-    shutil.copy(SAMPLE_ANSWERED_PDF, tmp_path / "student-b.pdf")
-    (tmp_path / "notes.txt").write_text("ignore me", encoding="utf-8")
+def test_grade_directory_reads_all_pdfs(generated_tmp_dir: Path, sample_pdfs: dict[str, Path]) -> None:
+    shutil.copy(sample_pdfs["sample_answered"], generated_tmp_dir / "student-a.pdf")
+    shutil.copy(sample_pdfs["sample_answered"], generated_tmp_dir / "student-b.pdf")
+    (generated_tmp_dir / "notes.txt").write_text("ignore me", encoding="utf-8")
 
-    results = grade_directory(tmp_path)
+    results = grade_directory(generated_tmp_dir)
 
     assert [result.source_pdf for result in results] == ["student-a.pdf", "student-b.pdf"]
     assert all(result.qr_data == DUMMY_QR_DATA for result in results)
@@ -195,11 +277,11 @@ def test_grade_directory_reads_all_pdfs(tmp_path: Path) -> None:
     assert all(result.omr_error == "" for result in results)
 
 
-def test_grade_directory_continues_when_one_pdf_fails(tmp_path: Path) -> None:
-    shutil.copy(SAMPLE_ANSWERED_PDF, tmp_path / "student-a.pdf")
-    shutil.copy(UNSUPPORTED_MARKERLESS_PDF, tmp_path / "student-b.pdf")
+def test_grade_directory_continues_when_one_pdf_fails(generated_tmp_dir: Path, sample_pdfs: dict[str, Path]) -> None:
+    shutil.copy(sample_pdfs["sample_answered"], generated_tmp_dir / "student-a.pdf")
+    shutil.copy(sample_pdfs["markerless"], generated_tmp_dir / "student-b.pdf")
 
-    results = grade_directory(tmp_path)
+    results = grade_directory(generated_tmp_dir)
 
     assert [result.source_pdf for result in results] == ["student-a.pdf", "student-b.pdf"]
     assert results[0].student_id == "63620"
@@ -210,18 +292,18 @@ def test_grade_directory_continues_when_one_pdf_fails(tmp_path: Path) -> None:
     assert "alignment marker" in results[1].omr_error
 
 
-def test_grade_path_accepts_directory(tmp_path: Path) -> None:
-    shutil.copy(SAMPLE_ANSWERED_PDF, tmp_path / "student-a.pdf")
+def test_grade_path_accepts_directory(generated_tmp_dir: Path, sample_pdfs: dict[str, Path]) -> None:
+    shutil.copy(sample_pdfs["sample_answered"], generated_tmp_dir / "student-a.pdf")
 
-    result = grade_path(tmp_path)
+    result = grade_path(generated_tmp_dir)
 
     assert isinstance(result, list)
     assert len(result) == 1
     assert result[0].source_pdf == "student-a.pdf"
 
 
-def test_grade_rotated_answered_sample_pdf() -> None:
-    result = grade_pdf(ROTATED_ANSWERED_PDF)
+def test_grade_rotated_answered_sample_pdf(sample_pdfs: dict[str, Path]) -> None:
+    result = grade_pdf(sample_pdfs["rotated"])
 
     assert result.qr_data == DUMMY_QR_DATA
     assert result.student_id == "33174"
@@ -232,8 +314,8 @@ def test_grade_rotated_answered_sample_pdf() -> None:
     }
 
 
-def test_grade_translated_answered_sample_pdf() -> None:
-    result = grade_pdf(TRANSLATED_ANSWERED_PDF)
+def test_grade_translated_answered_sample_pdf(sample_pdfs: dict[str, Path]) -> None:
+    result = grade_pdf(sample_pdfs["translated"])
 
     assert result.qr_data == DUMMY_QR_DATA
     assert result.student_id == "33174"
@@ -242,3 +324,116 @@ def test_grade_translated_answered_sample_pdf() -> None:
         "1": ["B"],
         "2": ["B", "D"],
     }
+
+
+def test_grade_pdf_writes_annotated_output(
+    generated_tmp_dir: Path,
+    sample_pdfs: dict[str, Path],
+) -> None:
+    output_pdf = generated_tmp_dir / "annotated.pdf"
+    correct_answers = load_correct_answers(str(ANSWER_KEY_JSON))
+
+    result = annotate_pdf(
+        sample_pdfs["sample_answered"],
+        output_path=output_pdf,
+        correct_answers=correct_answers,
+    )
+
+    assert result.annotated_pdf == str(output_pdf)
+    assert output_pdf.exists()
+    text = PdfReader(str(output_pdf)).pages[0].extract_text()
+    assert "Student ID: 63620" in text
+    assert DUMMY_QR_DATA["examSetId"] in text
+    assert DUMMY_QR_DATA["variantId"] in text
+    assert "QR Data:" not in text
+    assert "Read Answers:" not in text
+
+
+def test_load_correct_answers_from_json_file() -> None:
+    assert load_correct_answers(str(ANSWER_KEY_JSON)) == {
+        "1": ["D"],
+        "3": ["B", "C"],
+    }
+
+
+def test_grade_directory_writes_annotated_outputs(
+    generated_tmp_dir: Path,
+    sample_pdfs: dict[str, Path],
+) -> None:
+    input_dir = generated_tmp_dir / "inputs"
+    output_dir = generated_tmp_dir / "annotated"
+    input_dir.mkdir()
+    shutil.copy(sample_pdfs["sample_answered"], input_dir / "student-a.pdf")
+    shutil.copy(sample_pdfs["markerless"], input_dir / "student-b.pdf")
+
+    results = annotate_directory(input_dir, output_path=output_dir, correct_answers={"1": ["D"]})
+
+    assert len(results) == 2
+    assert Path(results[0].annotated_pdf).exists()
+    assert Path(results[1].annotated_pdf).exists()
+    assert results[0].annotated_pdf.endswith("student-a-annotated.pdf")
+    assert results[1].annotated_pdf.endswith("student-b-annotated.pdf")
+    error_text = PdfReader(results[1].annotated_pdf).pages[0].extract_text()
+    assert "OMR Error:" in error_text
+
+
+def test_correct_answer_overlay_skips_nonexistent_questions(
+    generated_tmp_dir: Path,
+    sample_pdfs: dict[str, Path],
+) -> None:
+    output_pdf = generated_tmp_dir / "rotated-annotated.pdf"
+    annotate_pdf(
+        sample_pdfs["rotated"],
+        output_path=output_pdf,
+        correct_answers=load_correct_answers(str(ANSWER_KEY_JSON)),
+    )
+
+    image = _rasterize_pdf_page(output_pdf)
+    layout = PageLayout()
+
+    def red_pixels_near(center_x_pt: float, center_y_pt: float) -> int:
+        scale_x = image.shape[1] / layout.page_width
+        scale_y = image.shape[0] / layout.page_height
+        center_x = int(round(center_x_pt * scale_x))
+        center_y = int(round(image.shape[0] - (center_y_pt * scale_y)))
+        patch = image[max(0, center_y - 10) : center_y + 11, max(0, center_x - 10) : center_x + 11]
+        blue = patch[:, :, 0].astype(int)
+        green = patch[:, :, 1].astype(int)
+        red = patch[:, :, 2].astype(int)
+        return int(((red > green + 20) & (red > blue + 20) & (red < 250)).sum())
+
+    question_1_d = layout.answer_option_center(0, 0, OPTION_LABELS.index("D"))
+    question_3_b = layout.answer_option_center(0, 2, OPTION_LABELS.index("B"))
+
+    assert red_pixels_near(*question_1_d) > 0
+    assert red_pixels_near(*question_3_b) == 0
+
+
+def test_grading_cli_outputs_json_and_annotation(
+    generated_tmp_dir: Path,
+    sample_pdfs: dict[str, Path],
+    cli_env: dict[str, str],
+) -> None:
+    output_pdf = generated_tmp_dir / "cli-annotated.pdf"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "omr.annotate",
+            str(sample_pdfs["sample_answered"]),
+            "--output",
+            str(output_pdf),
+            "--correct-answers",
+            str(ANSWER_KEY_JSON),
+        ],
+        cwd=ROOT,
+        env=cli_env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload["student_id"] == "63620"
+    assert payload["annotated_pdf"] == str(output_pdf)
+    assert output_pdf.exists()

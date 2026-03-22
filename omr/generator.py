@@ -51,7 +51,7 @@ def _draw_page(
 
     _draw_alignment_markers(pdf, layout)
     _draw_header(pdf, config, layout, page_number)
-    _draw_qr_placeholder(pdf, layout)
+    _draw_qr_placeholder(pdf, layout, config)
     _draw_student_id_block(pdf, layout)
     _draw_question_area(pdf, layout, page_questions)
 
@@ -67,11 +67,11 @@ def _draw_header(pdf: canvas.Canvas, config: SheetConfig, layout: PageLayout, pa
     pdf.drawString(left, top - layout.header_title_gap, config.instructions)
 
 
-def _draw_qr_placeholder(pdf: canvas.Canvas, layout: PageLayout) -> None:
+def _draw_qr_placeholder(pdf: canvas.Canvas, layout: PageLayout, config: SheetConfig) -> None:
     x = layout.qr_box_left
     y = layout.qr_box_bottom
     padding = layout.qr_padding
-    qr = segno.make(dummy_qr_payload(), error="m")
+    qr = segno.make(dummy_qr_payload(config), error="m")
     matrix = tuple(tuple(int(cell) for cell in row) for row in qr.matrix)
     module_rows = len(matrix)
     module_cols = len(matrix[0]) if matrix else 0
@@ -164,5 +164,11 @@ def _draw_alignment_markers(pdf: canvas.Canvas, layout: PageLayout) -> None:
         )
 
 
-def dummy_qr_payload() -> str:
-    return json.dumps(DUMMY_QR_DATA, separators=(",", ":"))
+def dummy_qr_payload(config: SheetConfig | None = None) -> str:
+    payload = DUMMY_QR_DATA
+    if config is not None:
+        payload = {
+            "examSetId": config.exam_set_id,
+            "variantId": config.variant_id,
+        }
+    return json.dumps(payload, separators=(",", ":"))
