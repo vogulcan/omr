@@ -198,6 +198,7 @@ def sample_pdfs(generated_pdf_dir: Path) -> dict[str, Path]:
 
     answer1_base = generated_pdf_dir / "answer1-base.pdf"
     answer1_pdf = generated_pdf_dir / "answer1.pdf"
+    missing_student_digit_pdf = generated_pdf_dir / "missing-student-digit.pdf"
     _make_base_sheet(
         answer1_base,
         [4, 4, 5, 3, 2, 5],
@@ -218,6 +219,21 @@ def sample_pdfs(generated_pdf_dir: Path) -> dict[str, Path]:
             "6": ["D"],
         },
         weak_student_digit_columns={4},
+        weak_answers={("3", "D"), ("6", "D")},
+    )
+    _mark_sheet(
+        source_pdf=answer1_base,
+        target_pdf=missing_student_digit_pdf,
+        layout=layout,
+        student_id="0134",
+        answers={
+            "1": ["D"],
+            "2": ["C"],
+            "3": ["B", "D"],
+            "4": ["C"],
+            "5": ["B"],
+            "6": ["D"],
+        },
         weak_answers={("3", "D"), ("6", "D")},
     )
 
@@ -251,6 +267,7 @@ def sample_pdfs(generated_pdf_dir: Path) -> dict[str, Path]:
     return {
         "sample_answered": sample_answered,
         "answer1": answer1_pdf,
+        "missing_student_digit": missing_student_digit_pdf,
         "markerless": markerless_pdf,
         "rotated": rotated_pdf,
         "translated": translated_pdf,

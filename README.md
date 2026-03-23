@@ -210,6 +210,11 @@ Fields:
 - `marked_answers: dict[str, list[str]]`
 - `omr_error: str`
 
+Notes:
+
+- grading raises an OMR error if any student ID column is empty or has multiple marked digits
+- the default A4 layout fits up to 50 questions per page
+
 ### Grade a Directory
 
 ```python

@@ -23,7 +23,7 @@ from omr.grade import (
     grade_pdf,
 )
 from omr.generator import DUMMY_QR_DATA, dummy_qr_payload, generate_omr_sheet
-from omr.layout import OPTION_LABELS, STUDENT_ID_COLUMNS, STUDENT_ID_ROWS, PageLayout, paginate_questions
+from omr.layout import MAX_QUESTIONS_PER_PAGE, OPTION_LABELS, STUDENT_ID_COLUMNS, STUDENT_ID_ROWS, PageLayout, paginate_questions
 from omr.models import SheetConfig
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -70,19 +70,27 @@ def test_student_id_area_dimensions_are_fixed() -> None:
     assert layout.student_id_block_height > 0
 
 
-def test_question_pagination_caps_at_ten_rows_per_column() -> None:
+def test_question_pagination_caps_at_thirteen_rows_per_column() -> None:
     config = SheetConfig(
-        question_option_counts=[4] * 12,
+        question_option_counts=[4] * 15,
         exam_set_id=TEST_EXAM_SET_ID,
         variant_id=TEST_VARIANT_ID,
     )
     pages = paginate_questions(config)
 
     assert len(pages) == 1
-    assert pages[0][9].column_index == 0
-    assert pages[0][9].row_index == 9
-    assert pages[0][10].column_index == 1
-    assert pages[0][10].row_index == 0
+    assert pages[0][12].column_index == 0
+    assert pages[0][12].row_index == 12
+    assert pages[0][13].column_index == 1
+    assert pages[0][13].row_index == 0
+
+
+def test_layout_caps_questions_per_page_at_fifty() -> None:
+    layout = PageLayout()
+
+    assert layout.answer_columns_per_page == 4
+    assert layout.questions_per_column == 13
+    assert layout.questions_per_page == MAX_QUESTIONS_PER_PAGE
 
 
 def test_question_option_labels_match_choice_count() -> None:
@@ -263,6 +271,11 @@ def test_grade_answer1_pdf(sample_pdfs: dict[str, Path]) -> None:
     }
 
 
+def test_grade_pdf_rejects_empty_student_id_column(sample_pdfs: dict[str, Path]) -> None:
+    with pytest.raises(UnsupportedSheetError, match="Student ID column 5 is empty"):
+        grade_pdf(sample_pdfs["missing_student_digit"])
+
+
 def test_grade_directory_reads_all_pdfs(generated_tmp_dir: Path, sample_pdfs: dict[str, Path]) -> None:
     shutil.copy(sample_pdfs["sample_answered"], generated_tmp_dir / "student-a.pdf")
     shutil.copy(sample_pdfs["sample_answered"], generated_tmp_dir / "student-b.pdf")
@@ -279,7 +292,7 @@ def test_grade_directory_reads_all_pdfs(generated_tmp_dir: Path, sample_pdfs: di
 
 def test_grade_directory_continues_when_one_pdf_fails(generated_tmp_dir: Path, sample_pdfs: dict[str, Path]) -> None:
     shutil.copy(sample_pdfs["sample_answered"], generated_tmp_dir / "student-a.pdf")
-    shutil.copy(sample_pdfs["markerless"], generated_tmp_dir / "student-b.pdf")
+    shutil.copy(sample_pdfs["missing_student_digit"], generated_tmp_dir / "student-b.pdf")
 
     results = grade_directory(generated_tmp_dir)
 
@@ -289,7 +302,7 @@ def test_grade_directory_continues_when_one_pdf_fails(generated_tmp_dir: Path, s
     assert results[1].student_id == ""
     assert results[1].marked_answers == {}
     assert "student-b.pdf" in results[1].omr_error
-    assert "alignment marker" in results[1].omr_error
+    assert "Student ID column 5 is empty" in results[1].omr_error
 
 
 def test_grade_path_accepts_directory(generated_tmp_dir: Path, sample_pdfs: dict[str, Path]) -> None:

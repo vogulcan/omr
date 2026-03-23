@@ -49,12 +49,12 @@ def grade_pdf(
     image = _rasterize_pdf_page(pdf_path)
     try:
         page_aligned_image, answer_aligned_image, qr_data = _align_image_to_layout(image, layout)
+        page_binary = _threshold_image(page_aligned_image)
+        answer_binary = _threshold_image(answer_aligned_image)
+        student_id = _grade_student_id(page_binary, layout)
+        marked_answers = _grade_answers(answer_binary, layout)
     except UnsupportedSheetError as exc:
         raise UnsupportedSheetError(f"{pdf_path}: {exc}") from exc
-    page_binary = _threshold_image(page_aligned_image)
-    answer_binary = _threshold_image(answer_aligned_image)
-    student_id = _grade_student_id(page_binary, layout)
-    marked_answers = _grade_answers(answer_binary, layout)
     return GradeResult(
         qr_data=qr_data,
         student_id=student_id,
@@ -296,8 +296,25 @@ def _grade_student_id(binary: np.ndarray, layout: PageLayout) -> str:
         for row_index in range(STUDENT_ID_ROWS):
             center_x_pt, center_y_pt = layout.student_id_bubble_center(column_index, row_index)
             column_scores.append(_fill_score(binary, layout, center_x_pt, center_y_pt))
-        digits.append(str(int(np.argmax(column_scores))))
+        marked_indexes = _marked_student_digit_indexes(column_scores)
+        if not marked_indexes:
+            raise UnsupportedSheetError(f"Student ID column {column_index + 1} is empty")
+        if len(marked_indexes) > 1:
+            raise UnsupportedSheetError(f"Student ID column {column_index + 1} has multiple marks")
+        digits.append(str(marked_indexes[0]))
     return "".join(digits)
+
+
+def _marked_student_digit_indexes(fill_scores: list[float]) -> list[int]:
+    if not fill_scores:
+        return []
+
+    max_score = max(fill_scores)
+    if max_score < MIN_MARK_SCORE:
+        return []
+
+    threshold = max(MIN_MARK_SCORE, max_score * RELATIVE_MARK_THRESHOLD)
+    return [index for index, score in enumerate(fill_scores) if score >= threshold]
 
 
 def _grade_answers(binary: np.ndarray, layout: PageLayout) -> dict[str, list[str]]:

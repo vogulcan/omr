@@ -10,6 +10,7 @@ from .models import SheetConfig
 OPTION_LABELS = ("A", "B", "C", "D", "E")
 STUDENT_ID_COLUMNS = 5
 STUDENT_ID_ROWS = 10
+MAX_QUESTIONS_PER_PAGE = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,12 +29,12 @@ class PageLayout:
     student_id_column_gap: float = 18.0
     student_id_row_gap: float = 7.0
     student_id_digit_gap: float = 18.0
-    questions_per_column: int = 10
+    questions_per_column: int = 13
     answer_top_gap: float = 34.0
-    answer_column_gap: float = 22.0
+    answer_column_gap: float = 15.0
     answer_row_height: float = 34.0
-    answer_label_width: float = 26.0
-    option_spacing: float = 20.0
+    answer_label_width: float = 18.0
+    option_spacing: float = 16.0
     bubble_radius: float = 7.0
     local_marker_size: float = 12.0
     local_marker_y_gap: float = 30.0
@@ -78,7 +79,7 @@ class PageLayout:
 
     @property
     def questions_per_page(self) -> int:
-        return self.answer_columns_per_page * self.questions_per_column
+        return min(self.answer_columns_per_page * self.questions_per_column, MAX_QUESTIONS_PER_PAGE)
 
     @property
     def qr_box_left(self) -> float:
