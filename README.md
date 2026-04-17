@@ -35,7 +35,7 @@ Generated sheets are:
 - A4 portrait
 - marker-based for registration
 - 5-digit student ID
-- handwritten template fields for `Name`, `Number`, and `Signature`
+- handwritten template fields for `Name`, `ID`, and `Signature`
 - 4 answer columns per page
 - question columns with at most `13` questions per column
 - up to `50` questions per page

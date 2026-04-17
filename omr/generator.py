@@ -135,7 +135,7 @@ def _draw_handwritten_info_block(pdf: canvas.Canvas, layout: PageLayout) -> None
     width = right - left
     height = top - bottom
     row_height = height / 3.0
-    fields = ("Name", "Number", "Signature")
+    fields = ("Name", "ID", "Signature")
 
     pdf.saveState()
     pdf.roundRect(left, bottom, width, height, 6, stroke=1, fill=0)

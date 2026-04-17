@@ -180,7 +180,7 @@ def test_generated_sheet_includes_handwritten_fields(generated_tmp_dir: Path) ->
 
     text = PdfReader(str(target)).pages[0].extract_text()
     assert "Name" in text
-    assert "Number" in text
+    assert "ID" in text
     assert "Signature" in text
 
 
