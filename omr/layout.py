@@ -8,7 +8,7 @@ from reportlab.lib.pagesizes import A4
 from .models import SheetConfig
 
 OPTION_LABELS = ("A", "B", "C", "D", "E")
-STUDENT_ID_COLUMNS = 5
+STUDENT_ID_COLUMNS = 8
 STUDENT_ID_ROWS = 10
 MAX_QUESTIONS_PER_PAGE = 50
 

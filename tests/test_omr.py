@@ -66,7 +66,7 @@ def test_config_exposes_uniform_question_option_counts() -> None:
 
 def test_student_id_area_dimensions_are_fixed() -> None:
     layout = PageLayout()
-    assert STUDENT_ID_COLUMNS == 5
+    assert STUDENT_ID_COLUMNS == 8
     assert STUDENT_ID_ROWS == 10
     assert layout.student_id_block_width > 0
     assert layout.student_id_block_height > 0
@@ -276,7 +276,7 @@ def test_grade_answered_sample_pdf(sample_pdfs: dict[str, Path]) -> None:
     result = grade_pdf(sample_pdfs["sample_answered"])
 
     assert result.qr_data == DUMMY_QR_DATA
-    assert result.student_id == "63620"
+    assert result.student_id == "63620147"
     assert result.omr_error == ""
     assert result.marked_answers == {
         "1": ["D"],
@@ -292,7 +292,7 @@ def test_grade_answer1_pdf(sample_pdfs: dict[str, Path]) -> None:
     result = grade_pdf(sample_pdfs["answer1"])
 
     assert result.qr_data == DUMMY_QR_DATA
-    assert result.student_id == "01345"
+    assert result.student_id == "01345072"
     assert result.omr_error == ""
     assert result.marked_answers == {
         "1": ["D"],
@@ -305,7 +305,7 @@ def test_grade_answer1_pdf(sample_pdfs: dict[str, Path]) -> None:
 
 
 def test_grade_pdf_rejects_empty_student_id_column(sample_pdfs: dict[str, Path]) -> None:
-    with pytest.raises(UnsupportedSheetError, match="Student ID column 5 is empty"):
+    with pytest.raises(UnsupportedSheetError, match="Student ID column 8 is empty"):
         grade_pdf(sample_pdfs["missing_student_digit"])
 
 
@@ -318,7 +318,7 @@ def test_grade_directory_reads_all_pdfs(generated_tmp_dir: Path, sample_pdfs: di
 
     assert [result.source_pdf for result in results] == ["student-a.pdf", "student-b.pdf"]
     assert all(result.qr_data == DUMMY_QR_DATA for result in results)
-    assert all(result.student_id == "63620" for result in results)
+    assert all(result.student_id == "63620147" for result in results)
     assert all(result.marked_answers["3"] == ["B", "C"] for result in results)
     assert all(result.omr_error == "" for result in results)
 
@@ -330,12 +330,12 @@ def test_grade_directory_continues_when_one_pdf_fails(generated_tmp_dir: Path, s
     results = grade_directory(generated_tmp_dir)
 
     assert [result.source_pdf for result in results] == ["student-a.pdf", "student-b.pdf"]
-    assert results[0].student_id == "63620"
+    assert results[0].student_id == "63620147"
     assert results[0].omr_error == ""
     assert results[1].student_id == ""
     assert results[1].marked_answers == {}
     assert "student-b.pdf" in results[1].omr_error
-    assert "Student ID column 5 is empty" in results[1].omr_error
+    assert "Student ID column 8 is empty" in results[1].omr_error
 
 
 def test_grade_path_accepts_directory(generated_tmp_dir: Path, sample_pdfs: dict[str, Path]) -> None:
@@ -352,7 +352,7 @@ def test_grade_rotated_answered_sample_pdf(sample_pdfs: dict[str, Path]) -> None
     result = grade_pdf(sample_pdfs["rotated"])
 
     assert result.qr_data == DUMMY_QR_DATA
-    assert result.student_id == "33174"
+    assert result.student_id == "33174026"
     assert result.omr_error == ""
     assert result.marked_answers == {
         "1": ["B"],
@@ -364,7 +364,7 @@ def test_grade_translated_answered_sample_pdf(sample_pdfs: dict[str, Path]) -> N
     result = grade_pdf(sample_pdfs["translated"])
 
     assert result.qr_data == DUMMY_QR_DATA
-    assert result.student_id == "33174"
+    assert result.student_id == "33174026"
     assert result.omr_error == ""
     assert result.marked_answers == {
         "1": ["B"],
@@ -388,7 +388,7 @@ def test_grade_pdf_writes_annotated_output(
     assert result.annotated_pdf == str(output_pdf)
     assert output_pdf.exists()
     text = PdfReader(str(output_pdf)).pages[0].extract_text()
-    assert "Student ID: 63620" in text
+    assert "Student ID: 63620147" in text
     assert DUMMY_QR_DATA["examSetId"] in text
     assert DUMMY_QR_DATA["variantId"] in text
     assert "QR Data:" not in text
@@ -480,6 +480,6 @@ def test_grading_cli_outputs_json_and_annotation(
     )
 
     payload = json.loads(result.stdout)
-    assert payload["student_id"] == "63620"
+    assert payload["student_id"] == "63620147"
     assert payload["annotated_pdf"] == str(output_pdf)
     assert output_pdf.exists()

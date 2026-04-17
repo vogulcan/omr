@@ -34,7 +34,7 @@ Generated sheets are:
 
 - A4 portrait
 - marker-based for registration
-- 5-digit student ID
+- 8-digit student ID
 - handwritten template fields for `Name`, `ID`, and `Signature`
 - 4 answer columns per page
 - question columns with at most `13` questions per column
@@ -321,7 +321,7 @@ Fields per item:
     "examSetId": "f6adcc63-71dc-412c-9c8d-a4609df454ff",
     "variantId": "37e3d65f-e540-4e34-b438-549e731be3b0"
   },
-  "student_id": "63620",
+  "student_id": "63620147",
   "marked_answers": {
     "1": ["D"],
     "2": ["C"],
@@ -344,7 +344,7 @@ Fields per item:
       "examSetId": "f6adcc63-71dc-412c-9c8d-a4609df454ff",
       "variantId": "37e3d65f-e540-4e34-b438-549e731be3b0"
     },
-    "student_id": "63620",
+    "student_id": "63620147",
     "marked_answers": {
       "1": ["D"]
     },
@@ -368,7 +368,7 @@ Fields per item:
     "examSetId": "f6adcc63-71dc-412c-9c8d-a4609df454ff",
     "variantId": "37e3d65f-e540-4e34-b438-549e731be3b0"
   },
-  "student_id": "63620",
+  "student_id": "63620147",
   "marked_answers": {
     "1": ["D"]
   },
@@ -460,7 +460,7 @@ uv run omr-annotate scans/ --output reviewed/
 
 - grading requires the current marker-based sheet format
 - grading reads only the first page of each PDF
-- student ID is fixed to 5 digits
+- student ID is fixed to 8 digits
 - student ID columns must have exactly one marked digit each
 - option labels are limited to `A-E`
 - geometric registration is marker-first

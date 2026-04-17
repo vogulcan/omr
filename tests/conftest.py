@@ -187,7 +187,7 @@ def sample_pdfs(generated_pdf_dir: Path) -> dict[str, Path]:
         source_pdf=sample_base,
         target_pdf=sample_answered,
         layout=layout,
-        student_id="63620",
+        student_id="63620147",
         answers={
             "1": ["D"],
             "2": ["C"],
@@ -212,7 +212,7 @@ def sample_pdfs(generated_pdf_dir: Path) -> dict[str, Path]:
         source_pdf=answer1_base,
         target_pdf=answer1_pdf,
         layout=layout,
-        student_id="01345",
+        student_id="01345072",
         answers={
             "1": ["D"],
             "2": ["C"],
@@ -228,7 +228,7 @@ def sample_pdfs(generated_pdf_dir: Path) -> dict[str, Path]:
         source_pdf=answer1_base,
         target_pdf=missing_student_digit_pdf,
         layout=layout,
-        student_id="0134",
+        student_id="0134507",
         answers={
             "1": ["D"],
             "2": ["C"],
@@ -256,7 +256,7 @@ def sample_pdfs(generated_pdf_dir: Path) -> dict[str, Path]:
         source_pdf=rotated_base,
         target_pdf=rotated_answered_base,
         layout=layout,
-        student_id="33174",
+        student_id="33174026",
         answers={
             "1": ["B"],
             "2": ["B", "D"],
