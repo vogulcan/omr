@@ -53,6 +53,7 @@ def _draw_page(
     _draw_header(pdf, config, layout, page_number)
     _draw_qr_placeholder(pdf, layout, config)
     _draw_student_id_block(pdf, layout)
+    _draw_handwritten_info_block(pdf, layout)
     _draw_question_area(pdf, layout, page_questions)
 
 
@@ -120,6 +121,33 @@ def _draw_student_id_block(pdf: canvas.Canvas, layout: PageLayout) -> None:
     for column_index in range(STUDENT_ID_COLUMNS):
         column_x = first_column_x + column_index * (layout.bubble_diameter + layout.student_id_column_gap)
         pdf.drawCentredString(column_x, header_y, str(column_index + 1))
+
+
+def _draw_handwritten_info_block(pdf: canvas.Canvas, layout: PageLayout) -> None:
+    left = layout.handwritten_block_left
+    right = layout.handwritten_block_right
+    top = layout.handwritten_block_top_y
+    bottom = layout.handwritten_block_bottom_y
+
+    if right <= left or top <= bottom:
+        return
+
+    width = right - left
+    height = top - bottom
+    row_height = height / 3.0
+    fields = ("Name", "Number", "Signature")
+
+    pdf.saveState()
+    pdf.roundRect(left, bottom, width, height, 6, stroke=1, fill=0)
+    pdf.setFont("Helvetica-Bold", 9)
+    for row_index, label in enumerate(fields):
+        row_top = top - row_index * row_height
+        row_bottom = row_top - row_height
+        if row_index:
+            pdf.line(left, row_top, right, row_top)
+        pdf.drawString(left + 10, row_top - 14, label)
+        pdf.line(left + 10, row_bottom + 12, right - 10, row_bottom + 12)
+    pdf.restoreState()
 
 
 def _draw_question_area(pdf: canvas.Canvas, layout: PageLayout, page_questions) -> None:

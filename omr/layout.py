@@ -90,6 +90,22 @@ class PageLayout:
         return self.page_height - self.margin - self.qr_size - self.qr_top_offset
 
     @property
+    def handwritten_block_left(self) -> float:
+        return self.margin + self.student_id_block_width + 24.0
+
+    @property
+    def handwritten_block_right(self) -> float:
+        return self.page_width - self.margin
+
+    @property
+    def handwritten_block_top_y(self) -> float:
+        return self.qr_box_bottom - 18.0
+
+    @property
+    def handwritten_block_bottom_y(self) -> float:
+        return self.answer_marker_y + 24.0
+
+    @property
     def qr_inner_left(self) -> float:
         return self.qr_box_left + self.qr_padding
 
@@ -185,7 +201,7 @@ def paginate_questions(config: SheetConfig, layout: PageLayout | None = None) ->
     layout = layout or PageLayout()
     pages: list[list[QuestionPlacement]] = []
 
-    for question_index, option_count in enumerate(config.question_option_counts):
+    for question_index in range(config.question_count):
         page_index = question_index // layout.questions_per_page
         position_in_page = question_index % layout.questions_per_page
         column_index = position_in_page // layout.questions_per_column
@@ -197,7 +213,7 @@ def paginate_questions(config: SheetConfig, layout: PageLayout | None = None) ->
         pages[page_index].append(
             QuestionPlacement(
                 question_number=question_index + 1,
-                option_count=option_count,
+                option_count=config.choice_count,
                 page_index=page_index,
                 column_index=column_index,
                 row_index=row_index,

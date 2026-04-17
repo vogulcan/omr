@@ -12,7 +12,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--questions",
         required=True,
-        help="Comma-separated option counts for each question, for example: 4,4,5,3",
+        help="Total number of questions to print on the sheet.",
+    )
+    parser.add_argument(
+        "--choices",
+        required=True,
+        help="Number of choices for every question, for example: 4 or 5",
     )
     parser.add_argument(
         "--exam-set-id",
@@ -42,15 +47,24 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_question_counts(raw_value: str) -> list[int]:
-    tokens = [token.strip() for token in raw_value.split(",")]
-    if not tokens or any(not token for token in tokens):
-        raise ValueError("Question counts must be a non-empty comma-separated list")
-
+def parse_question_count(raw_value: str) -> int:
     try:
-        return [int(token) for token in tokens]
+        value = int(raw_value)
     except ValueError as exc:
-        raise ValueError("Question counts must be integers") from exc
+        raise ValueError("Question count must be an integer") from exc
+    if value < 1:
+        raise ValueError("Question count must be at least 1")
+    return value
+
+
+def parse_choice_count(raw_value: str) -> int:
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError("Choice count must be an integer") from exc
+    if value < 2 or value > 5:
+        raise ValueError("Choice count must be between 2 and 5")
+    return value
 
 
 def main() -> None:
@@ -59,7 +73,8 @@ def main() -> None:
 
     try:
         config = SheetConfig(
-            question_option_counts=parse_question_counts(args.questions),
+            question_count=parse_question_count(args.questions),
+            choice_count=parse_choice_count(args.choices),
             exam_set_id=args.exam_set_id,
             variant_id=args.variant_id,
             title=args.title,

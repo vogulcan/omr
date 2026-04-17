@@ -142,10 +142,11 @@ def _translate_pdf_vector(source_pdf: Path, target_pdf: Path, *, shift_x: float,
         writer.write(handle)
 
 
-def _make_base_sheet(target_pdf: Path, question_counts: list[int], *, exam_set_id: str, variant_id: str) -> None:
+def _make_base_sheet(target_pdf: Path, question_count: int, choice_count: int, *, exam_set_id: str, variant_id: str) -> None:
     generate_omr_sheet(
         SheetConfig(
-            question_option_counts=question_counts,
+            question_count=question_count,
+            choice_count=choice_count,
             exam_set_id=exam_set_id,
             variant_id=variant_id,
         ),
@@ -177,7 +178,8 @@ def sample_pdfs(generated_pdf_dir: Path) -> dict[str, Path]:
     sample_answered = generated_pdf_dir / "sample-answered.pdf"
     _make_base_sheet(
         sample_base,
-        [4, 4, 5, 3, 2, 5],
+        6,
+        5,
         exam_set_id=DUMMY_QR_DATA["examSetId"],
         variant_id=DUMMY_QR_DATA["variantId"],
     )
@@ -201,7 +203,8 @@ def sample_pdfs(generated_pdf_dir: Path) -> dict[str, Path]:
     missing_student_digit_pdf = generated_pdf_dir / "missing-student-digit.pdf"
     _make_base_sheet(
         answer1_base,
-        [4, 4, 5, 3, 2, 5],
+        6,
+        5,
         exam_set_id=DUMMY_QR_DATA["examSetId"],
         variant_id=DUMMY_QR_DATA["variantId"],
     )
@@ -243,7 +246,8 @@ def sample_pdfs(generated_pdf_dir: Path) -> dict[str, Path]:
     rotated_base = generated_pdf_dir / "rotated-base.pdf"
     _make_base_sheet(
         rotated_base,
-        [4, 4],
+        2,
+        4,
         exam_set_id=DUMMY_QR_DATA["examSetId"],
         variant_id=DUMMY_QR_DATA["variantId"],
     )

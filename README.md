@@ -35,10 +35,11 @@ Generated sheets are:
 - A4 portrait
 - marker-based for registration
 - 5-digit student ID
+- handwritten template fields for `Name`, `Number`, and `Signature`
 - 4 answer columns per page
 - question columns with at most `13` questions per column
 - up to `50` questions per page
-- `2` to `5` answer options per question
+- `2` to `5` answer options per question, fixed across the whole sheet
 - QR-backed with `examSetId` and `variantId`
 
 The QR payload format is:
@@ -56,7 +57,8 @@ The QR payload format is:
 
 ```bash
 uv run omr \
-  --questions 4,4,5,3,2,5 \
+  --questions 50 \
+  --choices 4 \
   --exam-set-id f6adcc63-71dc-412c-9c8d-a4609df454ff \
   --variant-id 37e3d65f-e540-4e34-b438-549e731be3b0 \
   --output omr-sheet.pdf
@@ -66,7 +68,8 @@ With custom title and instructions:
 
 ```bash
 uv run omr \
-  --questions 4,4,4,4,5,5,3,2 \
+  --questions 40 \
+  --choices 5 \
   --exam-set-id exam-set-001 \
   --variant-id variant-a \
   --output exam-a.pdf \
@@ -76,7 +79,8 @@ uv run omr \
 
 Arguments:
 
-- `--questions`: required comma-separated option counts like `4,4,5,3`
+- `--questions`: required total number of questions to print
+- `--choices`: required number of choices for every question
 - `--exam-set-id`: required
 - `--variant-id`: required
 - `--output`: optional, defaults to `omr-sheet.pdf`
@@ -85,12 +89,15 @@ Arguments:
 
 Rules:
 
-- each question count must be between `2` and `5`
+- question count must be at least `1`
+- choice count must be between `2` and `5`
+- every generated question uses the same printed choices
 - questions are numbered from `1`
 - each question column holds at most `13` rows
 - each page holds at most `50` questions
 - extra questions spill onto new pages
 - the final sheet does not include page numbering
+- `--choices 4` prints `A-D`; `--choices 5` prints `A-E`
 
 ### 2. Grade a Filled Sheet
 
@@ -176,7 +183,8 @@ from omr import (
 from omr import SheetConfig, generate_omr_sheet
 
 config = SheetConfig(
-    question_option_counts=[4, 4, 5, 3, 2, 5],
+    question_count=50,
+    choice_count=4,
     exam_set_id="f6adcc63-71dc-412c-9c8d-a4609df454ff",
     variant_id="37e3d65f-e540-4e34-b438-549e731be3b0",
     title="Optical Mark Recognition Sheet",
@@ -422,7 +430,8 @@ Rules:
 
 ```bash
 uv run omr \
-  --questions 4,4,5,3,2,5 \
+  --questions 50 \
+  --choices 5 \
   --exam-set-id exam-set-001 \
   --variant-id variant-a \
   --output sheet.pdf

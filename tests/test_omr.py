@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from pypdf import PdfReader
 
-from omr.cli import parse_question_counts
+from omr.cli import parse_choice_count, parse_question_count
 from omr.annotate import annotate_directory, annotate_pdf, load_correct_answers
 from omr.grade import (
     UnsupportedSheetError,
@@ -32,34 +32,36 @@ TEST_EXAM_SET_ID = "11111111-2222-3333-4444-555555555555"
 TEST_VARIANT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
-def test_config_rejects_empty_question_list() -> None:
-    with pytest.raises(ValueError, match="must not be empty"):
-        SheetConfig(question_option_counts=[], exam_set_id=TEST_EXAM_SET_ID, variant_id=TEST_VARIANT_ID)
+def test_config_rejects_nonpositive_question_count() -> None:
+    with pytest.raises(ValueError, match="question_count must be at least 1"):
+        SheetConfig(question_count=0, choice_count=4, exam_set_id=TEST_EXAM_SET_ID, variant_id=TEST_VARIANT_ID)
 
 
 @pytest.mark.parametrize(("exam_set_id", "variant_id"), [("", TEST_VARIANT_ID), (TEST_EXAM_SET_ID, "")])
 def test_config_rejects_empty_qr_ids(exam_set_id: str, variant_id: str) -> None:
     with pytest.raises(ValueError, match="must not be empty"):
-        SheetConfig(question_option_counts=[4, 4], exam_set_id=exam_set_id, variant_id=variant_id)
+        SheetConfig(question_count=2, choice_count=4, exam_set_id=exam_set_id, variant_id=variant_id)
 
 
 @pytest.mark.parametrize("invalid_count", [0, 1, 6])
-def test_config_rejects_invalid_question_option_counts(invalid_count: int) -> None:
-    with pytest.raises(ValueError, match="between 2 and 5"):
+def test_config_rejects_invalid_choice_count(invalid_count: int) -> None:
+    with pytest.raises(ValueError, match="choice_count must be between 2 and 5"):
         SheetConfig(
-            question_option_counts=[4, invalid_count, 5],
+            question_count=3,
+            choice_count=invalid_count,
             exam_set_id=TEST_EXAM_SET_ID,
             variant_id=TEST_VARIANT_ID,
         )
 
 
-def test_config_accepts_mixed_valid_counts() -> None:
+def test_config_exposes_uniform_question_option_counts() -> None:
     config = SheetConfig(
-        question_option_counts=[2, 3, 4, 5],
+        question_count=4,
+        choice_count=5,
         exam_set_id=TEST_EXAM_SET_ID,
         variant_id=TEST_VARIANT_ID,
     )
-    assert config.question_option_counts == [2, 3, 4, 5]
+    assert config.question_option_counts == [5, 5, 5, 5]
 
 
 def test_student_id_area_dimensions_are_fixed() -> None:
@@ -72,7 +74,8 @@ def test_student_id_area_dimensions_are_fixed() -> None:
 
 def test_question_pagination_caps_at_thirteen_rows_per_column() -> None:
     config = SheetConfig(
-        question_option_counts=[4] * 15,
+        question_count=15,
+        choice_count=4,
         exam_set_id=TEST_EXAM_SET_ID,
         variant_id=TEST_VARIANT_ID,
     )
@@ -94,23 +97,24 @@ def test_layout_caps_questions_per_page_at_fifty() -> None:
 
 
 def test_question_option_labels_match_choice_count() -> None:
-    counts = [2, 3, 4, 5]
     config = SheetConfig(
-        question_option_counts=counts,
+        question_count=4,
+        choice_count=4,
         exam_set_id=TEST_EXAM_SET_ID,
         variant_id=TEST_VARIANT_ID,
     )
     page = paginate_questions(config)[0]
 
-    for placement, expected_count in zip(page, counts, strict=True):
-        assert placement.option_count == expected_count
-        assert list(OPTION_LABELS[:expected_count]) == list(OPTION_LABELS[: placement.option_count])
+    for placement in page:
+        assert placement.option_count == config.choice_count
+        assert list(OPTION_LABELS[: config.choice_count]) == list(OPTION_LABELS[: placement.option_count])
 
 
 def test_pagination_occurs_when_page_capacity_is_exceeded() -> None:
     layout = PageLayout()
     config = SheetConfig(
-        question_option_counts=[5] * (layout.questions_per_page + 1),
+        question_count=layout.questions_per_page + 1,
+        choice_count=5,
         exam_set_id=TEST_EXAM_SET_ID,
         variant_id=TEST_VARIANT_ID,
     )
@@ -121,14 +125,19 @@ def test_pagination_occurs_when_page_capacity_is_exceeded() -> None:
     assert pages[1][0].question_number == layout.questions_per_page + 1
 
 
-def test_parse_question_counts() -> None:
-    assert parse_question_counts("2, 3,4,5") == [2, 3, 4, 5]
+def test_parse_question_count() -> None:
+    assert parse_question_count("50") == 50
+
+
+def test_parse_choice_count() -> None:
+    assert parse_choice_count("4") == 4
 
 
 def test_dummy_qr_payload_is_expected_json() -> None:
     assert dummy_qr_payload(
         SheetConfig(
-            question_option_counts=[4],
+            question_count=1,
+            choice_count=4,
             exam_set_id=DUMMY_QR_DATA["examSetId"],
             variant_id=DUMMY_QR_DATA["variantId"],
         )
@@ -142,7 +151,8 @@ def test_generate_single_page_pdf(generated_tmp_dir: Path) -> None:
     target = generated_tmp_dir / "single-page.pdf"
     generate_omr_sheet(
         SheetConfig(
-            question_option_counts=[4] * 20,
+            question_count=20,
+            choice_count=4,
             exam_set_id=TEST_EXAM_SET_ID,
             variant_id=TEST_VARIANT_ID,
         ),
@@ -156,12 +166,31 @@ def test_generate_single_page_pdf(generated_tmp_dir: Path) -> None:
     assert len(re.findall(rb"/Type /Page\b", data)) == 1
 
 
+def test_generated_sheet_includes_handwritten_fields(generated_tmp_dir: Path) -> None:
+    target = generated_tmp_dir / "handwritten-fields.pdf"
+    generate_omr_sheet(
+        SheetConfig(
+            question_count=10,
+            choice_count=4,
+            exam_set_id=TEST_EXAM_SET_ID,
+            variant_id=TEST_VARIANT_ID,
+        ),
+        target,
+    )
+
+    text = PdfReader(str(target)).pages[0].extract_text()
+    assert "Name" in text
+    assert "Number" in text
+    assert "Signature" in text
+
+
 def test_generated_sheet_contains_detectable_markers(generated_tmp_dir: Path) -> None:
     target = generated_tmp_dir / "marker-sheet.pdf"
     layout = PageLayout()
     generate_omr_sheet(
         SheetConfig(
-            question_option_counts=[4] * 6,
+            question_count=6,
+            choice_count=4,
             exam_set_id=TEST_EXAM_SET_ID,
             variant_id=TEST_VARIANT_ID,
         ),
@@ -189,6 +218,7 @@ def test_marker_geometry_does_not_overlap_layout_regions() -> None:
     assert right_marker[1] > layout.answer_top_y + 10
     assert left_marker[0] < layout.answer_option_center(0, 0, 0)[0]
     assert right_marker[0] > layout.answer_option_center(layout.answer_columns_per_page - 1, 0, 4)[0]
+    assert layout.handwritten_block_bottom_y > right_marker[1] + layout.local_marker_half_size
 
 
 def test_generate_multi_page_pdf(generated_tmp_dir: Path) -> None:
@@ -196,7 +226,8 @@ def test_generate_multi_page_pdf(generated_tmp_dir: Path) -> None:
     target = generated_tmp_dir / "multi-page.pdf"
     generate_omr_sheet(
         SheetConfig(
-            question_option_counts=[5] * (layout.questions_per_page + 7),
+            question_count=layout.questions_per_page + 7,
+            choice_count=5,
             exam_set_id=TEST_EXAM_SET_ID,
             variant_id=TEST_VARIANT_ID,
         ),
@@ -215,7 +246,9 @@ def test_generation_cli_writes_pdf(generated_tmp_dir: Path, cli_env: dict[str, s
             sys.executable,
             str(ROOT / "main.py"),
             "--questions",
-            "4,4,5,3",
+            "4",
+            "--choices",
+            "5",
             "--exam-set-id",
             TEST_EXAM_SET_ID,
             "--variant-id",
