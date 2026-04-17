@@ -219,6 +219,8 @@ def test_marker_geometry_does_not_overlap_layout_regions() -> None:
     assert left_marker[0] < layout.answer_option_center(0, 0, 0)[0]
     assert right_marker[0] > layout.answer_option_center(layout.answer_columns_per_page - 1, 0, 4)[0]
     assert layout.handwritten_block_bottom_y > right_marker[1] + layout.local_marker_half_size
+    assert layout.annotation_box_top_y < layout.answer_bottom_y
+    assert layout.annotation_box_bottom_y > layout.corner_marker_centers()["bottom_right"][1] + layout.corner_marker_half_size
 
 
 def test_generate_multi_page_pdf(generated_tmp_dir: Path) -> None:

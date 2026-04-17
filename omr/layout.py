@@ -152,6 +152,27 @@ class PageLayout:
     def answer_marker_y(self) -> float:
         return self.answer_top_y + self.local_marker_y_gap
 
+    @property
+    def answer_bottom_y(self) -> float:
+        return self.answer_top_y - ((self.questions_per_column - 1) * self.answer_row_height)
+
+    @property
+    def annotation_box_left(self) -> float:
+        return max(self.margin, self.annotation_box_right - 280.0)
+
+    @property
+    def annotation_box_right(self) -> float:
+        return self.page_width - self.margin
+
+    @property
+    def annotation_box_bottom_y(self) -> float:
+        _, marker_y = self.corner_marker_centers()["bottom_right"]
+        return marker_y + self.corner_marker_half_size + 12.0
+
+    @property
+    def annotation_box_top_y(self) -> float:
+        return self.answer_bottom_y - 12.0
+
     def corner_marker_centers(self) -> dict[str, tuple[float, float]]:
         center = self.corner_marker_inset + self.corner_marker_half_size
         return {

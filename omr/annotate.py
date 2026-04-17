@@ -210,20 +210,37 @@ def _draw_metadata_watermark(
 ) -> None:
     lines = [f"Student ID: {student_id or '-'}"]
     if isinstance(qr_data, dict):
-        lines.append(str(qr_data.get("examSetId", "-")))
-        lines.append(str(qr_data.get("variantId", "-")))
+        lines.append(f"Exam Set: {qr_data.get('examSetId', '-')}")
+        lines.append(f"Variant: {qr_data.get('variantId', '-')}")
     else:
-        lines.append(_compact_json(qr_data))
+        lines.append(f"QR Data: {_compact_json(qr_data)}")
     if omr_error:
         lines.append(f"OMR Error: {omr_error}")
 
+    left = layout.annotation_box_left
+    right = layout.annotation_box_right
+    bottom = layout.annotation_box_bottom_y
+    top = layout.annotation_box_top_y
+    if right <= left or top <= bottom:
+        return
+
+    width = right - left
+    height = top - bottom
+    font_name = "Helvetica"
+    font_size = 8.5
+    leading = 10.0
+    wrapped_lines = _wrap_annotation_lines(pdf, lines, font_name, font_size, width - 18.0)
+
     pdf.saveState()
-    pdf.setFont("Helvetica", 9)
-    pdf.setFillColor(Color(1, 0, 0, alpha=1))
+    pdf.setFillColor(Color(1, 1, 1, alpha=0.84))
+    pdf.setStrokeColor(Color(0.72, 0, 0, alpha=0.30))
+    pdf.roundRect(left, bottom, width, height, 6, stroke=1, fill=1)
+    pdf.setFont(font_name, font_size)
+    pdf.setFillColor(Color(0.78, 0, 0, alpha=1))
     text = pdf.beginText()
-    text.setTextOrigin(layout.qr_box_left - 42, layout.qr_box_bottom - 24)
-    text.setLeading(10)
-    for line in lines:
+    text.setTextOrigin(left + 9, top - 14)
+    text.setLeading(leading)
+    for line in wrapped_lines:
         text.textLine(line)
     pdf.drawText(text)
     pdf.restoreState()
@@ -272,6 +289,74 @@ def _compact_json(value: dict | str | None) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
+
+
+def _wrap_annotation_lines(
+    pdf: canvas.Canvas,
+    lines: list[str],
+    font_name: str,
+    font_size: float,
+    max_width: float,
+) -> list[str]:
+    wrapped: list[str] = []
+    for line in lines:
+        wrapped.extend(_wrap_text_to_width(pdf, line, font_name, font_size, max_width))
+    return wrapped
+
+
+def _wrap_text_to_width(
+    pdf: canvas.Canvas,
+    text: str,
+    font_name: str,
+    font_size: float,
+    max_width: float,
+) -> list[str]:
+    if not text:
+        return [""]
+
+    words = text.split()
+    if not words:
+        return [text]
+
+    lines: list[str] = []
+    current = words[0]
+
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if pdf.stringWidth(candidate, font_name, font_size) <= max_width:
+            current = candidate
+            continue
+
+        lines.extend(_split_long_token(pdf, current, font_name, font_size, max_width))
+        current = word
+
+    lines.extend(_split_long_token(pdf, current, font_name, font_size, max_width))
+    return lines
+
+
+def _split_long_token(
+    pdf: canvas.Canvas,
+    text: str,
+    font_name: str,
+    font_size: float,
+    max_width: float,
+) -> list[str]:
+    if pdf.stringWidth(text, font_name, font_size) <= max_width:
+        return [text]
+
+    parts: list[str] = []
+    current = ""
+    for character in text:
+        candidate = f"{current}{character}"
+        if current and pdf.stringWidth(candidate, font_name, font_size) > max_width:
+            parts.append(current)
+            current = character
+            continue
+        current = candidate
+
+    if current:
+        parts.append(current)
+    return parts
 
 
 def load_correct_answers(value: str | None) -> dict[str, list[str]] | None:
