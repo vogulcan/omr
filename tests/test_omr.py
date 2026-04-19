@@ -25,6 +25,7 @@ from omr.grade import (
 from omr.generator import DUMMY_QR_DATA, dummy_qr_payload, generate_omr_sheet
 from omr.layout import MAX_QUESTIONS_PER_PAGE, OPTION_LABELS, STUDENT_ID_COLUMNS, STUDENT_ID_ROWS, PageLayout, paginate_questions
 from omr.models import MAX_QUESTION_COUNT, SheetConfig
+from omr.pdf_fonts import get_pdf_fonts
 
 ROOT = Path(__file__).resolve().parents[1]
 ANSWER_KEY_JSON = Path(__file__).resolve().parent / "answer-key.json"
@@ -176,6 +177,12 @@ def test_generate_single_page_pdf(generated_tmp_dir: Path) -> None:
     assert b"Page 1" not in data
     assert b"Dummy QR code" not in data
     assert len(re.findall(rb"/Type /Page\b", data)) == 1
+
+
+def test_pdf_fonts_prefer_latin_modern() -> None:
+    fonts = get_pdf_fonts()
+    assert fonts.regular == "OMRLatinModern-Regular"
+    assert fonts.bold == "OMRLatinModern-Bold"
 
 
 def test_generated_sheet_includes_handwritten_fields(generated_tmp_dir: Path) -> None:

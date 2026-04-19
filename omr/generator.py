@@ -10,6 +10,7 @@ import segno
 
 from .layout import OPTION_LABELS, STUDENT_ID_COLUMNS, STUDENT_ID_ROWS, PageLayout, paginate_questions
 from .models import SheetConfig
+from .pdf_fonts import PdfFontSet, get_pdf_fonts
 
 DUMMY_QR_DATA = {
     "examSetId": "f6adcc63-71dc-412c-9c8d-a4609df454ff",
@@ -23,12 +24,13 @@ def generate_omr_sheet(
     layout: PageLayout | None = None,
 ) -> None:
     layout = layout or PageLayout()
+    fonts = get_pdf_fonts()
 
     pdf = canvas.Canvas(str(destination) if isinstance(destination, (str, Path)) else destination)
     pdf.setPageCompression(0)
 
     for page_index, page_questions in enumerate(paginate_questions(config, layout), start=1):
-        _draw_page(pdf, config, layout, page_questions, page_index)
+        _draw_page(pdf, config, layout, fonts, page_questions, page_index)
         pdf.showPage()
 
     pdf.save()
@@ -38,6 +40,7 @@ def _draw_page(
     pdf: canvas.Canvas,
     config: SheetConfig,
     layout: PageLayout,
+    fonts: PdfFontSet,
     page_questions,
     page_number: int,
 ) -> None:
@@ -50,21 +53,21 @@ def _draw_page(
     pdf.setFillColor(black)
 
     _draw_alignment_markers(pdf, layout)
-    _draw_header(pdf, config, layout, page_number)
+    _draw_header(pdf, config, layout, fonts, page_number)
     _draw_qr_placeholder(pdf, layout, config)
-    _draw_student_id_block(pdf, layout)
-    _draw_handwritten_info_block(pdf, layout)
-    _draw_question_area(pdf, layout, page_questions)
+    _draw_student_id_block(pdf, layout, fonts)
+    _draw_handwritten_info_block(pdf, layout, fonts)
+    _draw_question_area(pdf, layout, fonts, page_questions)
 
 
-def _draw_header(pdf: canvas.Canvas, config: SheetConfig, layout: PageLayout, page_number: int) -> None:
+def _draw_header(pdf: canvas.Canvas, config: SheetConfig, layout: PageLayout, fonts: PdfFontSet, page_number: int) -> None:
     top = layout.page_height - layout.margin
     left = layout.margin
 
-    pdf.setFont("Helvetica-Bold", 18)
+    pdf.setFont(fonts.bold, 18)
     pdf.drawString(left, top, config.title)
 
-    pdf.setFont("Helvetica", 10)
+    pdf.setFont(fonts.regular, 10)
     pdf.drawString(left, top - layout.header_title_gap, config.instructions)
 
 
@@ -95,19 +98,18 @@ def _draw_qr_placeholder(pdf: canvas.Canvas, layout: PageLayout, config: SheetCo
             pdf.rect(module_x, module_y, module_size, module_size, stroke=0, fill=1)
 
 
-
-def _draw_student_id_block(pdf: canvas.Canvas, layout: PageLayout) -> None:
+def _draw_student_id_block(pdf: canvas.Canvas, layout: PageLayout, fonts: PdfFontSet) -> None:
     top = layout.student_id_top_y
     left = layout.margin
 
-    pdf.setFont("Helvetica-Bold", 12)
+    pdf.setFont(fonts.bold, 12)
     pdf.drawString(left, top, "Student ID")
 
     bubble_top = layout.student_id_bubble_top_y
     digit_label_x = left + 2
     first_column_x = left + layout.student_id_label_width
 
-    pdf.setFont("Helvetica", 10)
+    pdf.setFont(fonts.regular, 10)
     for row_index in range(STUDENT_ID_ROWS):
         row_y = bubble_top - row_index * (layout.bubble_diameter + layout.student_id_row_gap)
         pdf.drawRightString(digit_label_x + 18, row_y - 3, str(row_index))
@@ -117,13 +119,13 @@ def _draw_student_id_block(pdf: canvas.Canvas, layout: PageLayout) -> None:
             pdf.circle(column_x, row_y, layout.bubble_radius)
 
     header_y = bubble_top + 16
-    pdf.setFont("Helvetica", 10)
+    pdf.setFont(fonts.regular, 10)
     for column_index in range(STUDENT_ID_COLUMNS):
         column_x = first_column_x + column_index * (layout.bubble_diameter + layout.student_id_column_gap)
         pdf.drawCentredString(column_x, header_y, str(column_index + 1))
 
 
-def _draw_handwritten_info_block(pdf: canvas.Canvas, layout: PageLayout) -> None:
+def _draw_handwritten_info_block(pdf: canvas.Canvas, layout: PageLayout, fonts: PdfFontSet) -> None:
     left = layout.handwritten_block_left
     right = layout.handwritten_block_right
     top = layout.handwritten_block_top_y
@@ -139,7 +141,7 @@ def _draw_handwritten_info_block(pdf: canvas.Canvas, layout: PageLayout) -> None
 
     pdf.saveState()
     pdf.roundRect(left, bottom, width, height, 6, stroke=1, fill=0)
-    pdf.setFont("Helvetica-Bold", 9)
+    pdf.setFont(fonts.bold, 9)
     for row_index, label in enumerate(fields):
         row_top = top - row_index * row_height
         row_bottom = row_top - row_height
@@ -150,20 +152,20 @@ def _draw_handwritten_info_block(pdf: canvas.Canvas, layout: PageLayout) -> None
     pdf.restoreState()
 
 
-def _draw_question_area(pdf: canvas.Canvas, layout: PageLayout, page_questions) -> None:
+def _draw_question_area(pdf: canvas.Canvas, layout: PageLayout, fonts: PdfFontSet, page_questions) -> None:
     answer_top_y = layout.answer_top_y
     left = layout.margin
 
-    pdf.setFont("Helvetica", 8)
+    pdf.setFont(fonts.regular, 8)
     for placement in page_questions:
         column_x = left + placement.column_index * (layout.question_block_width + layout.answer_column_gap)
         row_y = answer_top_y - placement.row_index * layout.answer_row_height
 
-        pdf.setFont("Helvetica-Bold", 8)
+        pdf.setFont(fonts.bold, 8)
         pdf.drawRightString(column_x + layout.answer_label_width, row_y - 1, f"{placement.question_number}.")
 
         option_origin_x = column_x + layout.answer_label_width + 12
-        pdf.setFont("Helvetica", 7)
+        pdf.setFont(fonts.regular, 7)
         for option_index in range(placement.option_count):
             bubble_x = option_origin_x + option_index * layout.option_spacing
             pdf.circle(bubble_x, row_y + 2, layout.bubble_radius)

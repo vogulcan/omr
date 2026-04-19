@@ -12,6 +12,7 @@ from reportlab.pdfgen import canvas
 
 from .grade import BatchGradeResult, GradeResult, grade_directory, grade_path, grade_pdf
 from .layout import OPTION_LABELS, PageLayout
+from .pdf_fonts import PdfFontSet, get_pdf_fonts
 
 
 @dataclass(slots=True)
@@ -180,10 +181,12 @@ def _build_annotation_overlay(
 ) -> bytes:
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=(page_width, page_height))
+    fonts = get_pdf_fonts()
 
     _draw_metadata_watermark(
         pdf=pdf,
         layout=layout,
+        fonts=fonts,
         qr_data=qr_data,
         student_id=student_id,
         omr_error=omr_error,
@@ -192,6 +195,7 @@ def _build_annotation_overlay(
         _draw_correct_answer_overlay(
             pdf=pdf,
             layout=layout,
+            fonts=fonts,
             correct_answers=correct_answers,
             detected_questions=set(marked_answers),
         )
@@ -204,6 +208,7 @@ def _draw_metadata_watermark(
     *,
     pdf: canvas.Canvas,
     layout: PageLayout,
+    fonts: PdfFontSet,
     qr_data: dict | str | None,
     student_id: str,
     omr_error: str,
@@ -226,7 +231,7 @@ def _draw_metadata_watermark(
 
     width = right - left
     height = top - bottom
-    font_name = "Helvetica"
+    font_name = fonts.regular
     font_size = 8.5
     leading = 10.0
     wrapped_lines = _wrap_annotation_lines(pdf, lines, font_name, font_size, width - 18.0)
@@ -250,6 +255,7 @@ def _draw_correct_answer_overlay(
     *,
     pdf: canvas.Canvas,
     layout: PageLayout,
+    fonts: PdfFontSet,
     correct_answers: dict[str, list[str]],
     detected_questions: set[str],
 ) -> None:
@@ -277,7 +283,7 @@ def _draw_correct_answer_overlay(
             center_x, center_y = layout.answer_option_center(column_index, row_index, option_index)
             pdf.circle(center_x, center_y, layout.bubble_radius, stroke=1, fill=1)
             pdf.setFillColor(Color(0.75, 0, 0, alpha=0.18))
-            pdf.setFont("Helvetica-Bold", 8)
+            pdf.setFont(fonts.bold, 8)
             pdf.drawCentredString(center_x, center_y - 2.5, label)
             pdf.setFillColor(Color(1, 0, 0, alpha=0.10))
     pdf.restoreState()

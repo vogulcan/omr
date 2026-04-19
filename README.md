@@ -40,6 +40,7 @@ Generated sheets are:
 - question columns with at most `20` questions per column
 - up to `100` questions on a single page
 - `2` to `5` answer options per question, fixed across the whole sheet
+- displayed PDF text uses Latin Modern and falls back to Computer Modern
 - QR-backed with `examSetId` and `variantId`
 
 The QR payload format is:
