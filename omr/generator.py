@@ -154,20 +154,20 @@ def _draw_question_area(pdf: canvas.Canvas, layout: PageLayout, page_questions) 
     answer_top_y = layout.answer_top_y
     left = layout.margin
 
-    pdf.setFont("Helvetica", 10)
+    pdf.setFont("Helvetica", 8)
     for placement in page_questions:
         column_x = left + placement.column_index * (layout.question_block_width + layout.answer_column_gap)
         row_y = answer_top_y - placement.row_index * layout.answer_row_height
 
-        pdf.setFont("Helvetica-Bold", 10)
-        pdf.drawRightString(column_x + layout.answer_label_width, row_y, f"{placement.question_number}.")
+        pdf.setFont("Helvetica-Bold", 8)
+        pdf.drawRightString(column_x + layout.answer_label_width, row_y - 1, f"{placement.question_number}.")
 
         option_origin_x = column_x + layout.answer_label_width + 12
-        pdf.setFont("Helvetica", 10)
+        pdf.setFont("Helvetica", 7)
         for option_index in range(placement.option_count):
             bubble_x = option_origin_x + option_index * layout.option_spacing
             pdf.circle(bubble_x, row_y + 2, layout.bubble_radius)
-            pdf.drawCentredString(bubble_x, row_y + 14, OPTION_LABELS[option_index])
+            pdf.drawCentredString(bubble_x, row_y + 8, OPTION_LABELS[option_index])
 
 
 def _draw_alignment_markers(pdf: canvas.Canvas, layout: PageLayout) -> None:

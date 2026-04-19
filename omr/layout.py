@@ -5,12 +5,12 @@ from math import floor
 
 from reportlab.lib.pagesizes import A4
 
-from .models import SheetConfig
+from .models import MAX_QUESTION_COUNT, SheetConfig
 
 OPTION_LABELS = ("A", "B", "C", "D", "E")
 STUDENT_ID_COLUMNS = 8
 STUDENT_ID_ROWS = 10
-MAX_QUESTIONS_PER_PAGE = 50
+MAX_QUESTIONS_PER_PAGE = MAX_QUESTION_COUNT
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,13 +29,13 @@ class PageLayout:
     student_id_column_gap: float = 18.0
     student_id_row_gap: float = 7.0
     student_id_digit_gap: float = 18.0
-    questions_per_column: int = 13
+    questions_per_column: int = 20
     answer_top_gap: float = 34.0
-    answer_column_gap: float = 15.0
-    answer_row_height: float = 34.0
-    answer_label_width: float = 18.0
-    option_spacing: float = 16.0
-    bubble_radius: float = 7.0
+    answer_column_gap: float = 10.0
+    answer_row_height: float = 20.0
+    answer_label_width: float = 16.0
+    option_spacing: float = 12.0
+    bubble_radius: float = 5.5
     local_marker_size: float = 12.0
     local_marker_y_gap: float = 30.0
 
@@ -75,7 +75,7 @@ class PageLayout:
     def answer_columns_per_page(self) -> int:
         usable_width = self.answer_area_width + self.answer_column_gap
         column_span = self.question_block_width + self.answer_column_gap
-        return max(1, floor(usable_width / column_span))
+        return min(5, max(1, floor(usable_width / column_span)))
 
     @property
     def questions_per_page(self) -> int:

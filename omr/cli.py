@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from .generator import generate_omr_sheet
-from .models import SheetConfig
+from .models import MAX_QUESTION_COUNT, SheetConfig
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -12,7 +12,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--questions",
         required=True,
-        help="Total number of questions to print on the sheet.",
+        help=f"Total number of questions to print on the sheet, up to {MAX_QUESTION_COUNT}.",
     )
     parser.add_argument(
         "--choices",

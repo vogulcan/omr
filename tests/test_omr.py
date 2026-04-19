@@ -24,7 +24,7 @@ from omr.grade import (
 )
 from omr.generator import DUMMY_QR_DATA, dummy_qr_payload, generate_omr_sheet
 from omr.layout import MAX_QUESTIONS_PER_PAGE, OPTION_LABELS, STUDENT_ID_COLUMNS, STUDENT_ID_ROWS, PageLayout, paginate_questions
-from omr.models import SheetConfig
+from omr.models import MAX_QUESTION_COUNT, SheetConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 ANSWER_KEY_JSON = Path(__file__).resolve().parent / "answer-key.json"
@@ -35,6 +35,16 @@ TEST_VARIANT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 def test_config_rejects_nonpositive_question_count() -> None:
     with pytest.raises(ValueError, match="question_count must be at least 1"):
         SheetConfig(question_count=0, choice_count=4, exam_set_id=TEST_EXAM_SET_ID, variant_id=TEST_VARIANT_ID)
+
+
+def test_config_rejects_question_count_over_hundred() -> None:
+    with pytest.raises(ValueError, match="question_count must not exceed 100"):
+        SheetConfig(
+            question_count=MAX_QUESTION_COUNT + 1,
+            choice_count=4,
+            exam_set_id=TEST_EXAM_SET_ID,
+            variant_id=TEST_VARIANT_ID,
+        )
 
 
 @pytest.mark.parametrize(("exam_set_id", "variant_id"), [("", TEST_VARIANT_ID), (TEST_EXAM_SET_ID, "")])
@@ -72,9 +82,9 @@ def test_student_id_area_dimensions_are_fixed() -> None:
     assert layout.student_id_block_height > 0
 
 
-def test_question_pagination_caps_at_thirteen_rows_per_column() -> None:
+def test_question_pagination_caps_at_twenty_rows_per_column() -> None:
     config = SheetConfig(
-        question_count=15,
+        question_count=22,
         choice_count=4,
         exam_set_id=TEST_EXAM_SET_ID,
         variant_id=TEST_VARIANT_ID,
@@ -82,17 +92,17 @@ def test_question_pagination_caps_at_thirteen_rows_per_column() -> None:
     pages = paginate_questions(config)
 
     assert len(pages) == 1
-    assert pages[0][12].column_index == 0
-    assert pages[0][12].row_index == 12
-    assert pages[0][13].column_index == 1
-    assert pages[0][13].row_index == 0
+    assert pages[0][19].column_index == 0
+    assert pages[0][19].row_index == 19
+    assert pages[0][20].column_index == 1
+    assert pages[0][20].row_index == 0
 
 
-def test_layout_caps_questions_per_page_at_fifty() -> None:
+def test_layout_caps_questions_per_page_at_hundred() -> None:
     layout = PageLayout()
 
-    assert layout.answer_columns_per_page == 4
-    assert layout.questions_per_column == 13
+    assert layout.answer_columns_per_page == 5
+    assert layout.questions_per_column == 20
     assert layout.questions_per_page == MAX_QUESTIONS_PER_PAGE
 
 
@@ -110,19 +120,21 @@ def test_question_option_labels_match_choice_count() -> None:
         assert list(OPTION_LABELS[: config.choice_count]) == list(OPTION_LABELS[: placement.option_count])
 
 
-def test_pagination_occurs_when_page_capacity_is_exceeded() -> None:
+def test_hundred_questions_fit_on_a_single_page() -> None:
     layout = PageLayout()
     config = SheetConfig(
-        question_count=layout.questions_per_page + 1,
+        question_count=layout.questions_per_page,
         choice_count=5,
         exam_set_id=TEST_EXAM_SET_ID,
         variant_id=TEST_VARIANT_ID,
     )
     pages = paginate_questions(config, layout)
 
-    assert len(pages) == 2
+    assert len(pages) == 1
     assert len(pages[0]) == layout.questions_per_page
-    assert pages[1][0].question_number == layout.questions_per_page + 1
+    assert pages[0][-1].question_number == layout.questions_per_page
+    assert pages[0][-1].column_index == layout.answer_columns_per_page - 1
+    assert pages[0][-1].row_index == layout.questions_per_column - 1
 
 
 def test_parse_question_count() -> None:
@@ -223,12 +235,12 @@ def test_marker_geometry_does_not_overlap_layout_regions() -> None:
     assert layout.annotation_box_bottom_y > layout.corner_marker_centers()["bottom_right"][1] + layout.corner_marker_half_size
 
 
-def test_generate_multi_page_pdf(generated_tmp_dir: Path) -> None:
+def test_generate_hundred_question_pdf_on_single_page(generated_tmp_dir: Path) -> None:
     layout = PageLayout()
-    target = generated_tmp_dir / "multi-page.pdf"
+    target = generated_tmp_dir / "hundred-question.pdf"
     generate_omr_sheet(
         SheetConfig(
-            question_count=layout.questions_per_page + 7,
+            question_count=layout.questions_per_page,
             choice_count=5,
             exam_set_id=TEST_EXAM_SET_ID,
             variant_id=TEST_VARIANT_ID,
@@ -237,7 +249,7 @@ def test_generate_multi_page_pdf(generated_tmp_dir: Path) -> None:
     )
 
     data = target.read_bytes()
-    assert len(re.findall(rb"/Type /Page\b", data)) == 2
+    assert len(re.findall(rb"/Type /Page\b", data)) == 1
     assert b"Dummy QR code" not in data
 
 
