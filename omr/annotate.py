@@ -275,7 +275,7 @@ def _draw_correct_answer_overlay(
                 continue
             option_index = OPTION_LABELS.index(label)
             center_x, center_y = layout.answer_option_center(column_index, row_index, option_index)
-            pdf.circle(center_x, center_y, layout.bubble_radius + 2.0, stroke=1, fill=1)
+            pdf.circle(center_x, center_y, layout.bubble_radius, stroke=1, fill=1)
             pdf.setFillColor(Color(0.75, 0, 0, alpha=0.18))
             pdf.setFont("Helvetica-Bold", 8)
             pdf.drawCentredString(center_x, center_y - 2.5, label)
