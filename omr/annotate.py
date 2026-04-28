@@ -209,7 +209,6 @@ def _build_annotation_overlay(
         _draw_correct_answer_overlay(
             pdf=pdf,
             layout=layout,
-            fonts=fonts,
             correct_answers=correct_answers,
             detected_questions=set(marked_answers),
             alignment=alignment,
@@ -272,7 +271,6 @@ def _draw_correct_answer_overlay(
     *,
     pdf: canvas.Canvas,
     layout: PageLayout,
-    fonts: PdfFontSet,
     correct_answers: dict[str, list[str]],
     detected_questions: set[str],
     alignment: _AlignedSheet | None,
@@ -313,10 +311,6 @@ def _draw_correct_answer_overlay(
                     center_y=center_y,
                 )
             pdf.circle(center_x, center_y, bubble_radius, stroke=1, fill=1)
-            pdf.setFillColor(Color(0.75, 0, 0, alpha=0.18))
-            pdf.setFont(fonts.bold, 8)
-            pdf.drawCentredString(center_x, center_y - 2.5, label)
-            pdf.setFillColor(Color(1, 0, 0, alpha=0.10))
     pdf.restoreState()
 
 

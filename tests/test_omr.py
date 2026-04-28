@@ -461,7 +461,7 @@ def test_correct_answer_overlay_skips_nonexistent_questions(
     image = _rasterize_pdf_page(output_pdf)
     layout = PageLayout()
 
-    def red_pixels_near(center_x_pt: float, center_y_pt: float) -> int:
+    def red_pixels_near(center_x_pt: float, center_y_pt: float) -> tuple[int, float, float]:
         scale_x = image.shape[1] / layout.page_width
         scale_y = image.shape[0] / layout.page_height
         center_x = int(round(center_x_pt * scale_x))
@@ -470,7 +470,11 @@ def test_correct_answer_overlay_skips_nonexistent_questions(
         blue = patch[:, :, 0].astype(int)
         green = patch[:, :, 1].astype(int)
         red = patch[:, :, 2].astype(int)
-        return int(((red > green + 20) & (red > blue + 20) & (red < 250)).sum())
+        mask = (red > green + 15) & (red > blue + 15)
+        red_y, red_x = mask.nonzero()
+        if len(red_x) == 0:
+            return 0, 0.0, 0.0
+        return int(mask.sum()), float(red_x.mean() - 10), float(red_y.mean() - 10)
 
     def translated(center: tuple[float, float]) -> tuple[float, float]:
         return center[0] + 18.0, center[1] - 12.0
@@ -479,9 +483,13 @@ def test_correct_answer_overlay_skips_nonexistent_questions(
     nominal_question_1_d = layout.answer_option_center(0, 0, OPTION_LABELS.index("D"))
     question_3_b = translated(layout.answer_option_center(0, 2, OPTION_LABELS.index("B")))
 
-    assert red_pixels_near(*question_1_d) > 0
-    assert red_pixels_near(*nominal_question_1_d) == 0
-    assert red_pixels_near(*question_3_b) == 0
+    red_count, red_dx, red_dy = red_pixels_near(*question_1_d)
+
+    assert red_count > 0
+    assert abs(red_dx) <= 1.0
+    assert abs(red_dy) <= 1.0
+    assert red_pixels_near(*nominal_question_1_d)[0] == 0
+    assert red_pixels_near(*question_3_b)[0] == 0
 
 
 def test_grading_cli_outputs_json_and_annotation(
