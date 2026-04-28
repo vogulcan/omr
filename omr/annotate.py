@@ -6,11 +6,12 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import numpy as np
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.colors import Color
 from reportlab.pdfgen import canvas
 
-from .grade import BatchGradeResult, GradeResult, grade_directory, grade_path, grade_pdf
+from .grade import GradeResult, _AlignedSheet, _grade_pdf_with_alignment
 from .layout import OPTION_LABELS, PageLayout
 from .pdf_fonts import PdfFontSet, get_pdf_fonts
 
@@ -43,12 +44,13 @@ def annotate_pdf(
 ) -> AnnotateResult:
     layout = layout or PageLayout()
     source_pdf = Path(pdf_path)
-    grade_result = grade_pdf(source_pdf, layout=layout)
+    grade_result, alignment = _grade_pdf_with_alignment(source_pdf, layout=layout)
     annotated_target = _resolve_annotated_output_path(source_pdf, output_path, directory_mode=False)
     _write_annotated_pdf(
         source_pdf=source_pdf,
         target_pdf=annotated_target,
         layout=layout,
+        alignment=alignment,
         qr_data=grade_result.qr_data,
         student_id=grade_result.student_id,
         marked_answers=grade_result.marked_answers,
@@ -75,15 +77,24 @@ def annotate_directory(
     target_dir = Path(directory)
     pdf_paths = sorted(path for path in target_dir.iterdir() if path.is_file() and path.suffix.lower() == ".pdf")
     results: list[BatchAnnotateResult] = []
-    batch_results = {result.source_pdf: result for result in grade_directory(target_dir, layout=layout)}
 
     for pdf_path in pdf_paths:
-        grade_result = batch_results[pdf_path.name]
+        try:
+            grade_result, alignment = _grade_pdf_with_alignment(pdf_path, layout=layout)
+        except Exception as exc:
+            grade_result = GradeResult(
+                qr_data=None,
+                student_id="",
+                marked_answers={},
+                omr_error=str(exc),
+            )
+            alignment = None
         annotated_target = _resolve_annotated_output_path(pdf_path, output_path, directory_mode=True)
         _write_annotated_pdf(
             source_pdf=pdf_path,
             target_pdf=annotated_target,
             layout=layout,
+            alignment=alignment,
             qr_data=grade_result.qr_data,
             student_id=grade_result.student_id,
             marked_answers=grade_result.marked_answers,
@@ -139,6 +150,7 @@ def _write_annotated_pdf(
     source_pdf: Path,
     target_pdf: Path,
     layout: PageLayout,
+    alignment: _AlignedSheet | None,
     qr_data: dict | str | None,
     student_id: str,
     marked_answers: dict[str, list[str]],
@@ -154,6 +166,7 @@ def _write_annotated_pdf(
         page_width=width,
         page_height=height,
         layout=layout,
+        alignment=alignment,
         qr_data=qr_data,
         student_id=student_id,
         marked_answers=marked_answers,
@@ -173,6 +186,7 @@ def _build_annotation_overlay(
     page_width: float,
     page_height: float,
     layout: PageLayout,
+    alignment: _AlignedSheet | None,
     qr_data: dict | str | None,
     student_id: str,
     marked_answers: dict[str, list[str]],
@@ -198,6 +212,9 @@ def _build_annotation_overlay(
             fonts=fonts,
             correct_answers=correct_answers,
             detected_questions=set(marked_answers),
+            alignment=alignment,
+            page_width=page_width,
+            page_height=page_height,
         )
 
     pdf.save()
@@ -258,7 +275,12 @@ def _draw_correct_answer_overlay(
     fonts: PdfFontSet,
     correct_answers: dict[str, list[str]],
     detected_questions: set[str],
+    alignment: _AlignedSheet | None,
+    page_width: float,
+    page_height: float,
 ) -> None:
+    bubble_radius = _overlay_bubble_radius(layout, page_width, page_height)
+
     pdf.saveState()
     pdf.setFillColor(Color(1, 0, 0, alpha=0.10))
     pdf.setStrokeColor(Color(1, 0, 0, alpha=0.22))
@@ -281,12 +303,54 @@ def _draw_correct_answer_overlay(
                 continue
             option_index = OPTION_LABELS.index(label)
             center_x, center_y = layout.answer_option_center(column_index, row_index, option_index)
-            pdf.circle(center_x, center_y, layout.bubble_radius, stroke=1, fill=1)
+            if alignment is not None:
+                center_x, center_y = _layout_point_to_source_pdf_point(
+                    layout=layout,
+                    alignment=alignment,
+                    page_width=page_width,
+                    page_height=page_height,
+                    center_x=center_x,
+                    center_y=center_y,
+                )
+            pdf.circle(center_x, center_y, bubble_radius, stroke=1, fill=1)
             pdf.setFillColor(Color(0.75, 0, 0, alpha=0.18))
             pdf.setFont(fonts.bold, 8)
             pdf.drawCentredString(center_x, center_y - 2.5, label)
             pdf.setFillColor(Color(1, 0, 0, alpha=0.10))
     pdf.restoreState()
+
+
+def _layout_point_to_source_pdf_point(
+    *,
+    layout: PageLayout,
+    alignment: _AlignedSheet,
+    page_width: float,
+    page_height: float,
+    center_x: float,
+    center_y: float,
+) -> tuple[float, float]:
+    scale_x = alignment.source_image_width_px / layout.page_width
+    scale_y = alignment.source_image_height_px / layout.page_height
+    answer_aligned_point = np.array(
+        [
+            center_x * scale_x,
+            alignment.source_image_height_px - (center_y * scale_y),
+            1.0,
+        ]
+    )
+    source_point = alignment.answer_aligned_to_source_transform @ answer_aligned_point
+    source_x = source_point[0] / source_point[2]
+    source_y = source_point[1] / source_point[2]
+    return (
+        source_x * page_width / alignment.source_image_width_px,
+        page_height - (source_y * page_height / alignment.source_image_height_px),
+    )
+
+
+def _overlay_bubble_radius(layout: PageLayout, page_width: float, page_height: float) -> float:
+    scale_x = page_width / layout.page_width
+    scale_y = page_height / layout.page_height
+    return layout.bubble_radius * ((scale_x + scale_y) / 2)
 
 
 def _compact_json(value: dict | str | None) -> str:

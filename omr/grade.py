@@ -40,26 +40,47 @@ class BatchGradeResult:
     omr_error: str
 
 
+@dataclass(frozen=True, slots=True)
+class _AlignedSheet:
+    page_aligned_image: np.ndarray
+    answer_aligned_image: np.ndarray
+    qr_data: dict | str | None
+    answer_aligned_to_source_transform: np.ndarray
+    source_image_width_px: int
+    source_image_height_px: int
+
+
 def grade_pdf(
     pdf_path: str | Path,
     layout: PageLayout | None = None,
 ) -> GradeResult:
+    result, _ = _grade_pdf_with_alignment(pdf_path, layout=layout)
+    return result
+
+
+def _grade_pdf_with_alignment(
+    pdf_path: str | Path,
+    layout: PageLayout | None = None,
+) -> tuple[GradeResult, _AlignedSheet]:
     layout = layout or PageLayout()
     pdf_path = Path(pdf_path)
     image = _rasterize_pdf_page(pdf_path)
     try:
-        page_aligned_image, answer_aligned_image, qr_data = _align_image_to_layout(image, layout)
-        page_binary = _threshold_image(page_aligned_image)
-        answer_binary = _threshold_image(answer_aligned_image)
+        aligned_sheet = _align_image_to_layout(image, layout)
+        page_binary = _threshold_image(aligned_sheet.page_aligned_image)
+        answer_binary = _threshold_image(aligned_sheet.answer_aligned_image)
         student_id = _grade_student_id(page_binary, layout)
         marked_answers = _grade_answers(answer_binary, layout)
     except UnsupportedSheetError as exc:
         raise UnsupportedSheetError(f"{pdf_path}: {exc}") from exc
-    return GradeResult(
-        qr_data=qr_data,
-        student_id=student_id,
-        marked_answers=marked_answers,
-        omr_error="",
+    return (
+        GradeResult(
+            qr_data=aligned_sheet.qr_data,
+            student_id=student_id,
+            marked_answers=marked_answers,
+            omr_error="",
+        ),
+        aligned_sheet,
     )
 
 
@@ -130,9 +151,7 @@ def _rasterize_pdf_page(pdf_path: Path, dpi: int = 200) -> np.ndarray:
         return image
 
 
-def _align_image_to_layout(
-    image: np.ndarray, layout: PageLayout
-) -> tuple[np.ndarray, np.ndarray, dict | str | None]:
+def _align_image_to_layout(image: np.ndarray, layout: PageLayout) -> _AlignedSheet:
     page_binary = _threshold_image(image)
     page_marker_centers = _detect_page_marker_centers(page_binary, layout)
     expected_page_centers = _expected_marker_centers_px(image, layout, layout.corner_marker_centers())
@@ -154,6 +173,7 @@ def _align_image_to_layout(
     answer_marker_centers = _detect_answer_marker_centers(answer_binary, layout)
     expected_answer_centers = _expected_marker_centers_px(page_aligned_image, layout, layout.local_marker_centers())
     answer_transform = _similarity_transform_from_two_points(answer_marker_centers, expected_answer_centers)
+    source_to_answer_transform = _affine_to_homography(answer_transform) @ page_transform
     answer_aligned_image = cv2.warpAffine(
         page_aligned_image,
         answer_transform,
@@ -162,7 +182,18 @@ def _align_image_to_layout(
         borderMode=cv2.BORDER_CONSTANT,
         borderValue=(255, 255, 255),
     )
-    return page_aligned_image, answer_aligned_image, qr_data
+    return _AlignedSheet(
+        page_aligned_image=page_aligned_image,
+        answer_aligned_image=answer_aligned_image,
+        qr_data=qr_data,
+        answer_aligned_to_source_transform=np.linalg.inv(source_to_answer_transform),
+        source_image_width_px=image.shape[1],
+        source_image_height_px=image.shape[0],
+    )
+
+
+def _affine_to_homography(transform: np.ndarray) -> np.ndarray:
+    return np.vstack([transform, np.array([0.0, 0.0, 1.0])])
 
 
 def _decode_qr_data(image: np.ndarray) -> dict | str | None:

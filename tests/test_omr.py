@@ -451,9 +451,9 @@ def test_correct_answer_overlay_skips_nonexistent_questions(
     generated_tmp_dir: Path,
     sample_pdfs: dict[str, Path],
 ) -> None:
-    output_pdf = generated_tmp_dir / "rotated-annotated.pdf"
+    output_pdf = generated_tmp_dir / "translated-annotated.pdf"
     annotate_pdf(
-        sample_pdfs["rotated"],
+        sample_pdfs["translated"],
         output_path=output_pdf,
         correct_answers=load_correct_answers(str(ANSWER_KEY_JSON)),
     )
@@ -472,10 +472,15 @@ def test_correct_answer_overlay_skips_nonexistent_questions(
         red = patch[:, :, 2].astype(int)
         return int(((red > green + 20) & (red > blue + 20) & (red < 250)).sum())
 
-    question_1_d = layout.answer_option_center(0, 0, OPTION_LABELS.index("D"))
-    question_3_b = layout.answer_option_center(0, 2, OPTION_LABELS.index("B"))
+    def translated(center: tuple[float, float]) -> tuple[float, float]:
+        return center[0] + 18.0, center[1] - 12.0
+
+    question_1_d = translated(layout.answer_option_center(0, 0, OPTION_LABELS.index("D")))
+    nominal_question_1_d = layout.answer_option_center(0, 0, OPTION_LABELS.index("D"))
+    question_3_b = translated(layout.answer_option_center(0, 2, OPTION_LABELS.index("B")))
 
     assert red_pixels_near(*question_1_d) > 0
+    assert red_pixels_near(*nominal_question_1_d) == 0
     assert red_pixels_near(*question_3_b) == 0
 
 
