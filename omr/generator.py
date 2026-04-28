@@ -164,12 +164,15 @@ def _draw_question_area(pdf: canvas.Canvas, layout: PageLayout, fonts: PdfFontSe
         pdf.setFont(fonts.bold, 8)
         pdf.drawRightString(column_x + layout.answer_label_width, row_y - 1, f"{placement.question_number}.")
 
-        option_origin_x = column_x + layout.answer_label_width + 12
         pdf.setFont(fonts.regular, 7)
         for option_index in range(placement.option_count):
-            bubble_x = option_origin_x + option_index * layout.option_spacing
-            pdf.circle(bubble_x, row_y + 2, layout.bubble_radius)
-            pdf.drawCentredString(bubble_x, row_y + 8, OPTION_LABELS[option_index])
+            bubble_x, bubble_y = layout.answer_option_center(
+                placement.column_index,
+                placement.row_index,
+                option_index,
+            )
+            pdf.circle(bubble_x, bubble_y, layout.bubble_radius)
+            pdf.drawCentredString(bubble_x, bubble_y + 6, OPTION_LABELS[option_index])
 
 
 def _draw_alignment_markers(pdf: canvas.Canvas, layout: PageLayout) -> None:

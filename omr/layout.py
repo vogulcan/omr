@@ -34,7 +34,9 @@ class PageLayout:
     answer_column_gap: float = 10.0
     answer_row_height: float = 20.0
     answer_label_width: float = 16.0
-    option_spacing: float = 12.0
+    answer_option_left_gap: float = 12.0
+    answer_option_right_gap: float = 12.0
+    option_spacing: float = 14.0
     bubble_radius: float = 5.5
     local_marker_size: float = 12.0
     local_marker_y_gap: float = 30.0
@@ -65,7 +67,8 @@ class PageLayout:
 
     @property
     def question_block_width(self) -> float:
-        return self.answer_label_width + (5 * self.option_spacing) + 16.0
+        last_option_offset = (len(OPTION_LABELS) - 1) * self.option_spacing
+        return self.answer_label_width + self.answer_option_left_gap + last_option_offset + self.answer_option_right_gap
 
     @property
     def answer_area_width(self) -> float:
@@ -202,7 +205,7 @@ class PageLayout:
             self.margin
             + column_index * (self.question_block_width + self.answer_column_gap)
             + self.answer_label_width
-            + 12
+            + self.answer_option_left_gap
             + option_index * self.option_spacing
         )
         center_y = self.answer_top_y - row_index * self.answer_row_height + 2

@@ -102,9 +102,12 @@ def test_question_pagination_caps_at_twenty_rows_per_column() -> None:
 def test_layout_caps_questions_per_page_at_hundred() -> None:
     layout = PageLayout()
 
+    assert layout.option_spacing - layout.bubble_diameter >= 3.0
     assert layout.answer_columns_per_page == 5
     assert layout.questions_per_column == 20
     assert layout.questions_per_page == MAX_QUESTIONS_PER_PAGE
+    last_bubble_x, _ = layout.answer_option_center(layout.answer_columns_per_page - 1, 0, 4)
+    assert last_bubble_x + layout.bubble_radius < layout.page_width - layout.margin
 
 
 def test_question_option_labels_match_choice_count() -> None:
