@@ -8,14 +8,17 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.colors import black, white
 from reportlab.pdfgen import canvas
 
+import omr.annotate as annotate_module
 from omr.cli import parse_choice_count, parse_question_count
-from omr.annotate import annotate_directory, annotate_pdf, load_correct_answers
+from omr.annotate import annotate_directory, annotate_pdf, load_correct_answers, _refine_source_bubble_center
 from omr.grade import (
+    _AlignedSheet,
     UnsupportedSheetError,
     _detect_answer_marker_centers,
     _detect_page_marker_centers,
@@ -607,6 +610,46 @@ def test_correct_answer_overlay_snaps_to_shifted_answer_bubbles(generated_tmp_di
     assert len(red_x) > 0
     assert abs(float(red_x.mean() - 10)) <= 1.0
     assert abs(float(red_y.mean() - 10)) <= 1.0
+
+
+def test_bubble_center_refinement_ignores_hough_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
+    layout = PageLayout()
+    image = np.full((int(layout.page_height), int(layout.page_width), 3), 255, dtype=np.uint8)
+    alignment = _AlignedSheet(
+        source_image=image,
+        page_aligned_image=image,
+        answer_aligned_image=image,
+        qr_data=None,
+        answer_aligned_to_source_transform=np.eye(3),
+        source_image_width_px=image.shape[1],
+        source_image_height_px=image.shape[0],
+    )
+    center_x = 100.0
+    center_y = 100.0
+
+    def hough_jitter(*args: object, **kwargs: object) -> np.ndarray:
+        return np.array([[[25.0, 25.0, layout.bubble_radius]]], dtype=np.float32)
+
+    monkeypatch.setattr(annotate_module.cv2, "HoughCircles", hough_jitter)
+
+    assert _refine_source_bubble_center(
+        layout=layout,
+        alignment=alignment,
+        center_x=center_x,
+        center_y=center_y,
+    ) == (center_x, center_y)
+
+    def hough_real_shift(*args: object, **kwargs: object) -> np.ndarray:
+        return np.array([[[30.0, 24.0, layout.bubble_radius]]], dtype=np.float32)
+
+    monkeypatch.setattr(annotate_module.cv2, "HoughCircles", hough_real_shift)
+
+    assert _refine_source_bubble_center(
+        layout=layout,
+        alignment=alignment,
+        center_x=center_x,
+        center_y=center_y,
+    ) == pytest.approx((106.0, 100.0))
 
 
 def test_grading_cli_outputs_json_and_annotation(

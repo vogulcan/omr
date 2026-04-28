@@ -16,6 +16,9 @@ from .grade import GradeResult, _AlignedSheet, _grade_pdf_with_alignment
 from .layout import OPTION_LABELS, PageLayout
 from .pdf_fonts import PdfFontSet, get_pdf_fonts
 
+HOUGH_REFINEMENT_JITTER_RATIO = 0.30
+HOUGH_REFINEMENT_MIN_JITTER_PX = 1.5
+
 
 @dataclass(slots=True)
 class AnnotateResult:
@@ -406,6 +409,10 @@ def _refine_source_bubble_center(
         return center_x, center_y
 
     _, best_x, best_y = min(candidates, key=lambda candidate: candidate[0])
+    jitter_tolerance = max(HOUGH_REFINEMENT_MIN_JITTER_PX, radius_px * HOUGH_REFINEMENT_JITTER_RATIO)
+    if np.hypot(best_x - center_x, best_y - center_y) <= jitter_tolerance:
+        return center_x, center_y
+
     return best_x, best_y
 
 
