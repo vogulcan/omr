@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 import re
 import shutil
 import subprocess
@@ -8,7 +9,9 @@ import sys
 from pathlib import Path
 
 import pytest
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
+from reportlab.lib.colors import black, white
+from reportlab.pdfgen import canvas
 
 from omr.cli import parse_choice_count, parse_question_count
 from omr.annotate import annotate_directory, annotate_pdf, load_correct_answers
@@ -31,6 +34,68 @@ ROOT = Path(__file__).resolve().parents[1]
 ANSWER_KEY_JSON = Path(__file__).resolve().parent / "answer-key.json"
 TEST_EXAM_SET_ID = "11111111-2222-3333-4444-555555555555"
 TEST_VARIANT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+
+def _merge_test_overlay(source_pdf: Path, overlay_pdf_bytes: bytes, target_pdf: Path) -> None:
+    reader = PdfReader(str(source_pdf))
+    writer = PdfWriter()
+    overlay_reader = PdfReader(io.BytesIO(overlay_pdf_bytes))
+    for page in reader.pages:
+        writer.add_page(page)
+    writer.pages[0].merge_page(overlay_reader.pages[0])
+    with target_pdf.open("wb") as handle:
+        writer.write(handle)
+
+
+def _write_shifted_answer_rows_pdf(
+    *,
+    source_pdf: Path,
+    target_pdf: Path,
+    layout: PageLayout,
+    answers: dict[int, list[str]],
+    student_id: str,
+    row_count: int,
+    shift_y: float,
+) -> None:
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=(layout.page_width, layout.page_height))
+    column_x = layout.margin
+    erase_left = column_x - 4
+    erase_right = column_x + layout.question_block_width + 4
+    erase_top = layout.answer_top_y + 18
+    erase_bottom = layout.answer_top_y - ((row_count - 1) * layout.answer_row_height) - 18 + shift_y
+
+    pdf.setFillColor(white)
+    pdf.setStrokeColor(white)
+    pdf.rect(erase_left, erase_bottom, erase_right - erase_left, erase_top - erase_bottom, stroke=0, fill=1)
+
+    pdf.setStrokeColor(black)
+    pdf.setFillColor(black)
+    for row_index in range(row_count):
+        row_y = layout.answer_top_y - row_index * layout.answer_row_height + shift_y
+        pdf.setFont("Helvetica-Bold", 8)
+        pdf.drawRightString(column_x + layout.answer_label_width, row_y - 1, f"{row_index + 1}.")
+
+        pdf.setFont("Helvetica", 7)
+        for option_index in range(5):
+            center_x, center_y = layout.answer_option_center(0, row_index, option_index)
+            center_y += shift_y
+            pdf.circle(center_x, center_y, layout.bubble_radius)
+            pdf.drawCentredString(center_x, center_y + 6, OPTION_LABELS[option_index])
+
+    for question_number, labels in answers.items():
+        row_index = question_number - 1
+        for label in labels:
+            option_index = OPTION_LABELS.index(label)
+            center_x, center_y = layout.answer_option_center(0, row_index, option_index)
+            pdf.circle(center_x, center_y + shift_y, layout.bubble_radius * 0.58, stroke=0, fill=1)
+
+    for column_index, digit in enumerate(student_id):
+        center_x, center_y = layout.student_id_bubble_center(column_index, int(digit))
+        pdf.circle(center_x, center_y, layout.bubble_radius * 0.58, stroke=0, fill=1)
+
+    pdf.save()
+    _merge_test_overlay(source_pdf, buffer.getvalue(), target_pdf)
 
 
 def test_config_rejects_nonpositive_question_count() -> None:
@@ -490,6 +555,58 @@ def test_correct_answer_overlay_skips_nonexistent_questions(
     assert abs(red_dy) <= 1.0
     assert red_pixels_near(*nominal_question_1_d)[0] == 0
     assert red_pixels_near(*question_3_b)[0] == 0
+
+
+def test_correct_answer_overlay_snaps_to_shifted_answer_bubbles(generated_tmp_dir: Path) -> None:
+    layout = PageLayout()
+    base_pdf = generated_tmp_dir / "base.pdf"
+    shifted_pdf = generated_tmp_dir / "shifted.pdf"
+    annotated_pdf = generated_tmp_dir / "shifted-annotated.pdf"
+    shift_y = -4.0
+
+    generate_omr_sheet(
+        SheetConfig(
+            question_count=10,
+            choice_count=5,
+            exam_set_id=TEST_EXAM_SET_ID,
+            variant_id=TEST_VARIANT_ID,
+        ),
+        base_pdf,
+    )
+    _write_shifted_answer_rows_pdf(
+        source_pdf=base_pdf,
+        target_pdf=shifted_pdf,
+        layout=layout,
+        answers={1: ["B"]},
+        student_id="00038145",
+        row_count=10,
+        shift_y=shift_y,
+    )
+
+    result = annotate_pdf(
+        shifted_pdf,
+        output_path=annotated_pdf,
+        correct_answers={"1": ["B"]},
+    )
+
+    assert "B" in result.marked_answers["1"]
+
+    image = _rasterize_pdf_page(annotated_pdf)
+    center_x_pt, center_y_pt = layout.answer_option_center(0, 0, OPTION_LABELS.index("B"))
+    scale_x = image.shape[1] / layout.page_width
+    scale_y = image.shape[0] / layout.page_height
+    center_x = int(round(center_x_pt * scale_x))
+    center_y = int(round(image.shape[0] - ((center_y_pt + shift_y) * scale_y)))
+    patch = image[max(0, center_y - 10) : center_y + 11, max(0, center_x - 10) : center_x + 11]
+    blue = patch[:, :, 0].astype(int)
+    green = patch[:, :, 1].astype(int)
+    red = patch[:, :, 2].astype(int)
+    mask = (red > green + 15) & (red > blue + 15)
+    red_y, red_x = mask.nonzero()
+
+    assert len(red_x) > 0
+    assert abs(float(red_x.mean() - 10)) <= 1.0
+    assert abs(float(red_y.mean() - 10)) <= 1.0
 
 
 def test_grading_cli_outputs_json_and_annotation(

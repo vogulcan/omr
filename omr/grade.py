@@ -42,6 +42,7 @@ class BatchGradeResult:
 
 @dataclass(frozen=True, slots=True)
 class _AlignedSheet:
+    source_image: np.ndarray
     page_aligned_image: np.ndarray
     answer_aligned_image: np.ndarray
     qr_data: dict | str | None
@@ -183,6 +184,7 @@ def _align_image_to_layout(image: np.ndarray, layout: PageLayout) -> _AlignedShe
         borderValue=(255, 255, 255),
     )
     return _AlignedSheet(
+        source_image=image,
         page_aligned_image=page_aligned_image,
         answer_aligned_image=answer_aligned_image,
         qr_data=qr_data,

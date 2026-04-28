@@ -6,6 +6,7 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import cv2
 import numpy as np
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.colors import Color
@@ -302,24 +303,33 @@ def _draw_correct_answer_overlay(
             option_index = OPTION_LABELS.index(label)
             center_x, center_y = layout.answer_option_center(column_index, row_index, option_index)
             if alignment is not None:
-                center_x, center_y = _layout_point_to_source_pdf_point(
+                source_x, source_y = _layout_point_to_source_raster_point(
                     layout=layout,
+                    alignment=alignment,
+                    center_x=center_x,
+                    center_y=center_y,
+                )
+                source_x, source_y = _refine_source_bubble_center(
+                    layout=layout,
+                    alignment=alignment,
+                    center_x=source_x,
+                    center_y=source_y,
+                )
+                center_x, center_y = _source_raster_point_to_pdf_point(
                     alignment=alignment,
                     page_width=page_width,
                     page_height=page_height,
-                    center_x=center_x,
-                    center_y=center_y,
+                    center_x=source_x,
+                    center_y=source_y,
                 )
             pdf.circle(center_x, center_y, bubble_radius, stroke=1, fill=1)
     pdf.restoreState()
 
 
-def _layout_point_to_source_pdf_point(
+def _layout_point_to_source_raster_point(
     *,
     layout: PageLayout,
     alignment: _AlignedSheet,
-    page_width: float,
-    page_height: float,
     center_x: float,
     center_y: float,
 ) -> tuple[float, float]:
@@ -333,12 +343,83 @@ def _layout_point_to_source_pdf_point(
         ]
     )
     source_point = alignment.answer_aligned_to_source_transform @ answer_aligned_point
-    source_x = source_point[0] / source_point[2]
-    source_y = source_point[1] / source_point[2]
+    return source_point[0] / source_point[2], source_point[1] / source_point[2]
+
+
+def _source_raster_point_to_pdf_point(
+    *,
+    alignment: _AlignedSheet,
+    page_width: float,
+    page_height: float,
+    center_x: float,
+    center_y: float,
+) -> tuple[float, float]:
     return (
-        source_x * page_width / alignment.source_image_width_px,
-        page_height - (source_y * page_height / alignment.source_image_height_px),
+        center_x * page_width / alignment.source_image_width_px,
+        page_height - (center_y * page_height / alignment.source_image_height_px),
     )
+
+
+def _refine_source_bubble_center(
+    *,
+    layout: PageLayout,
+    alignment: _AlignedSheet,
+    center_x: float,
+    center_y: float,
+) -> tuple[float, float]:
+    image = alignment.source_image
+    radius_px = _source_bubble_radius(layout, alignment)
+    pad = max(24, int(round(radius_px * 2.8)))
+    x0 = max(0, int(round(center_x)) - pad)
+    x1 = min(image.shape[1], int(round(center_x)) + pad + 1)
+    y0 = max(0, int(round(center_y)) - pad)
+    y1 = min(image.shape[0], int(round(center_y)) + pad + 1)
+    if x1 <= x0 or y1 <= y0:
+        return center_x, center_y
+
+    roi = image[y0:y1, x0:x1].copy()
+    red_mask = _red_overlay_mask(roi)
+    roi[red_mask] = 255
+    grayscale = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.medianBlur(grayscale, 5)
+    circles = cv2.HoughCircles(
+        blurred,
+        cv2.HOUGH_GRADIENT,
+        dp=1.2,
+        minDist=max(12.0, radius_px * 1.4),
+        param1=80,
+        param2=14,
+        minRadius=max(3, int(round(radius_px * 0.6))),
+        maxRadius=max(4, int(round(radius_px * 1.45))),
+    )
+    if circles is None:
+        return center_x, center_y
+
+    candidates: list[tuple[float, float, float]] = []
+    for circle_x, circle_y, circle_radius in circles[0]:
+        source_x = x0 + float(circle_x)
+        source_y = y0 + float(circle_y)
+        distance = float(np.hypot(source_x - center_x, source_y - center_y))
+        radius_penalty = abs(float(circle_radius) - radius_px) * 0.35
+        candidates.append((distance + radius_penalty, source_x, source_y))
+    if not candidates:
+        return center_x, center_y
+
+    _, best_x, best_y = min(candidates, key=lambda candidate: candidate[0])
+    return best_x, best_y
+
+
+def _red_overlay_mask(image: np.ndarray) -> np.ndarray:
+    blue = image[:, :, 0].astype(int)
+    green = image[:, :, 1].astype(int)
+    red = image[:, :, 2].astype(int)
+    return (red > green + 15) & (red > blue + 15)
+
+
+def _source_bubble_radius(layout: PageLayout, alignment: _AlignedSheet) -> float:
+    scale_x = alignment.source_image_width_px / layout.page_width
+    scale_y = alignment.source_image_height_px / layout.page_height
+    return layout.bubble_radius * ((scale_x + scale_y) / 2)
 
 
 def _overlay_bubble_radius(layout: PageLayout, page_width: float, page_height: float) -> float:
