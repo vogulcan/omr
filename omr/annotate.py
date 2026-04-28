@@ -281,8 +281,8 @@ def _draw_correct_answer_overlay(
     bubble_radius = _overlay_bubble_radius(layout, page_width, page_height)
 
     pdf.saveState()
-    pdf.setFillColor(Color(1, 0, 0, alpha=0.10))
-    pdf.setStrokeColor(Color(1, 0, 0, alpha=0.22))
+    pdf.setFillColor(Color(1, 0, 0, alpha=0.14))
+    pdf.setStrokeColor(Color(1, 0, 0, alpha=0.28))
     for question_key, labels in correct_answers.items():
         if question_key not in detected_questions:
             continue
