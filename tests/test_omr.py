@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 from pypdf import PdfReader, PdfWriter
@@ -20,6 +21,7 @@ from omr.annotate import annotate_directory, annotate_pdf, load_correct_answers,
 from omr.grade import (
     _AlignedSheet,
     UnsupportedSheetError,
+    _decode_qr_data_from_layout,
     _detect_answer_marker_centers,
     _detect_page_marker_centers,
     _rasterize_pdf_page,
@@ -295,6 +297,26 @@ def test_generated_sheet_contains_detectable_markers(generated_tmp_dir: Path) ->
 
     assert corner_markers.shape == (4, 2)
     assert local_markers.shape == (2, 2)
+
+
+def test_layout_qr_crop_recovers_downsampled_page(generated_tmp_dir: Path) -> None:
+    target = generated_tmp_dir / "qr-crop-sheet.pdf"
+    layout = PageLayout()
+    generate_omr_sheet(
+        SheetConfig(
+            question_count=50,
+            choice_count=4,
+            exam_set_id=DUMMY_QR_DATA["examSetId"],
+            variant_id=DUMMY_QR_DATA["variantId"],
+        ),
+        target,
+    )
+
+    image = _rasterize_pdf_page(target)
+    small = cv2.resize(image, None, fx=0.6, fy=0.6, interpolation=cv2.INTER_AREA)
+    degraded = cv2.resize(small, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_LINEAR)
+
+    assert _decode_qr_data_from_layout(degraded, layout) == DUMMY_QR_DATA
 
 
 def test_marker_geometry_does_not_overlap_layout_regions() -> None:

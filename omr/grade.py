@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from math import ceil, floor
 import subprocess
 import tempfile
 from dataclasses import asdict, dataclass
@@ -17,6 +18,8 @@ MIN_MARK_SCORE = 0.10
 RELATIVE_MARK_THRESHOLD = 0.35
 OUTLINE_LIFT_WEIGHT = 0.8
 ROW_PRESENCE_THRESHOLD = 0.05
+QR_CROP_PADDING_PT = 8.0
+QR_CROP_SCALE_FACTORS = (1, 2, 3, 4)
 
 
 class UnsupportedSheetError(RuntimeError):
@@ -168,6 +171,8 @@ def _align_image_to_layout(image: np.ndarray, layout: PageLayout) -> _AlignedShe
 
     qr_data = _decode_qr_data(page_aligned_image)
     if qr_data is None:
+        qr_data = _decode_qr_data_from_layout(page_aligned_image, layout)
+    if qr_data is None:
         qr_data = _decode_qr_data(image)
 
     answer_binary = _threshold_image(page_aligned_image)
@@ -201,6 +206,53 @@ def _affine_to_homography(transform: np.ndarray) -> np.ndarray:
 def _decode_qr_data(image: np.ndarray) -> dict | str | None:
     detector = cv2.QRCodeDetector()
     decoded_text, _, _ = detector.detectAndDecode(image)
+    return _parse_qr_data(decoded_text)
+
+
+def _decode_qr_data_from_layout(image: np.ndarray, layout: PageLayout) -> dict | str | None:
+    qr_crop = _crop_qr_region(image, layout)
+    if qr_crop is None:
+        return None
+
+    detector = cv2.QRCodeDetector()
+    for scale_factor in QR_CROP_SCALE_FACTORS:
+        candidate = qr_crop
+        if scale_factor != 1:
+            candidate = cv2.resize(
+                qr_crop,
+                None,
+                fx=scale_factor,
+                fy=scale_factor,
+                interpolation=cv2.INTER_CUBIC,
+            )
+        decoded_text, _, _ = detector.detectAndDecode(candidate)
+        decoded_data = _parse_qr_data(decoded_text)
+        if decoded_data is not None:
+            return decoded_data
+    return None
+
+
+def _crop_qr_region(image: np.ndarray, layout: PageLayout) -> np.ndarray | None:
+    height_px, width_px = image.shape[:2]
+    scale_x = width_px / layout.page_width
+    scale_y = height_px / layout.page_height
+
+    left_pt = max(0.0, layout.qr_box_left - QR_CROP_PADDING_PT)
+    right_pt = min(layout.page_width, layout.qr_box_left + layout.qr_size + QR_CROP_PADDING_PT)
+    bottom_pt = max(0.0, layout.qr_box_bottom - QR_CROP_PADDING_PT)
+    top_pt = min(layout.page_height, layout.qr_box_bottom + layout.qr_size + QR_CROP_PADDING_PT)
+
+    x0 = max(0, floor(left_pt * scale_x))
+    x1 = min(width_px, ceil(right_pt * scale_x))
+    y0 = max(0, floor(height_px - (top_pt * scale_y)))
+    y1 = min(height_px, ceil(height_px - (bottom_pt * scale_y)))
+
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return image[y0:y1, x0:x1]
+
+
+def _parse_qr_data(decoded_text: str) -> dict | str | None:
     if not decoded_text:
         return None
     try:
