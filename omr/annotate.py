@@ -18,6 +18,11 @@ from .pdf_fonts import PdfFontSet, get_pdf_fonts
 
 HOUGH_REFINEMENT_JITTER_RATIO = 0.30
 HOUGH_REFINEMENT_MIN_JITTER_PX = 1.5
+ANSWER_ROW_REFINEMENT_X_PADDING_RATIO = 2.2
+ANSWER_ROW_REFINEMENT_Y_PADDING_RATIO = 1.8
+ANSWER_ROW_BUBBLE_CLUSTER_MIN_SPAN_RATIO = 0.9
+ANSWER_ROW_BUBBLE_CLUSTER_SPLIT_RATIO = 0.45
+ANSWER_ROW_CANDIDATE_MERGE_RATIO = 0.9
 
 
 @dataclass(slots=True)
@@ -312,9 +317,12 @@ def _draw_correct_answer_overlay(
                     center_x=center_x,
                     center_y=center_y,
                 )
-                source_x, source_y = _refine_source_bubble_center(
+                source_x, source_y = _refine_source_answer_option_center(
                     layout=layout,
                     alignment=alignment,
+                    column_index=column_index,
+                    row_index=row_index,
+                    option_index=option_index,
                     center_x=source_x,
                     center_y=source_y,
                 )
@@ -363,6 +371,79 @@ def _source_raster_point_to_pdf_point(
     )
 
 
+def _refine_source_answer_option_center(
+    *,
+    layout: PageLayout,
+    alignment: _AlignedSheet,
+    column_index: int,
+    row_index: int,
+    option_index: int,
+    center_x: float,
+    center_y: float,
+) -> tuple[float, float]:
+    image = alignment.source_image
+    radius_px = _source_bubble_radius(layout, alignment)
+    expected_centers: list[tuple[float, float]] = []
+    for index in range(len(OPTION_LABELS)):
+        option_center_x, option_center_y = layout.answer_option_center(column_index, row_index, index)
+        expected_centers.append(
+            _layout_point_to_source_raster_point(
+                layout=layout,
+                alignment=alignment,
+                center_x=option_center_x,
+                center_y=option_center_y,
+            )
+        )
+    x_values = [point[0] for point in expected_centers]
+    y_values = [point[1] for point in expected_centers]
+    x0 = max(0, int(round(min(x_values) - radius_px * ANSWER_ROW_REFINEMENT_X_PADDING_RATIO)))
+    x1 = min(image.shape[1], int(round(max(x_values) + radius_px * ANSWER_ROW_REFINEMENT_X_PADDING_RATIO)) + 1)
+    y0 = max(0, int(round(min(y_values) - radius_px * ANSWER_ROW_REFINEMENT_Y_PADDING_RATIO)))
+    y1 = min(image.shape[0], int(round(max(y_values) + radius_px * ANSWER_ROW_REFINEMENT_Y_PADDING_RATIO)) + 1)
+    if x1 <= x0 or y1 <= y0:
+        return _refine_source_bubble_center(layout=layout, alignment=alignment, center_x=center_x, center_y=center_y)
+
+    circles = _detect_source_bubble_circles(image[y0:y1, x0:x1].copy(), radius_px)
+    candidates = [(x0 + circle_x, y0 + circle_y, circle_radius) for circle_x, circle_y, circle_radius in circles]
+    row_candidates = _answer_row_bubble_candidates(candidates, radius_px)
+    if len(row_candidates) > option_index:
+        candidate_x, candidate_y, _ = sorted(row_candidates, key=lambda candidate: candidate[0])[option_index]
+        return candidate_x, candidate_y
+    if row_candidates:
+        candidate_x, candidate_y, _ = min(
+            row_candidates,
+            key=lambda candidate: abs(candidate[0] - center_x) + (abs(candidate[1] - center_y) * 0.25),
+        )
+        return candidate_x, candidate_y
+    return _refine_source_bubble_center(layout=layout, alignment=alignment, center_x=center_x, center_y=center_y)
+
+
+def _answer_row_bubble_candidates(
+    candidates: list[tuple[float, float, float]],
+    radius_px: float,
+) -> list[tuple[float, float, float]]:
+    if not candidates:
+        return []
+    y_values = [candidate[1] for candidate in candidates]
+    y_span = max(y_values) - min(y_values)
+    row_candidates = candidates
+    if y_span >= radius_px * ANSWER_ROW_BUBBLE_CLUSTER_MIN_SPAN_RATIO:
+        split_y = min(y_values) + (y_span * ANSWER_ROW_BUBBLE_CLUSTER_SPLIT_RATIO)
+        lower_candidates = [candidate for candidate in candidates if candidate[1] >= split_y]
+        if len(lower_candidates) >= 2:
+            row_candidates = lower_candidates
+
+    merged: list[tuple[float, float, float]] = []
+    for candidate in sorted(row_candidates, key=lambda item: (item[0], item[1])):
+        if merged and abs(candidate[0] - merged[-1][0]) <= radius_px * ANSWER_ROW_CANDIDATE_MERGE_RATIO:
+            previous = merged[-1]
+            if candidate[2] > previous[2]:
+                merged[-1] = candidate
+            continue
+        merged.append(candidate)
+    return merged
+
+
 def _refine_source_bubble_center(
     *,
     layout: PageLayout,
@@ -380,7 +461,29 @@ def _refine_source_bubble_center(
     if x1 <= x0 or y1 <= y0:
         return center_x, center_y
 
-    roi = image[y0:y1, x0:x1].copy()
+    circles = _detect_source_bubble_circles(image[y0:y1, x0:x1].copy(), radius_px)
+    if not circles:
+        return center_x, center_y
+
+    candidates: list[tuple[float, float, float]] = []
+    for circle_x, circle_y, circle_radius in circles:
+        source_x = x0 + float(circle_x)
+        source_y = y0 + float(circle_y)
+        distance = float(np.hypot(source_x - center_x, source_y - center_y))
+        radius_penalty = abs(float(circle_radius) - radius_px) * 0.35
+        candidates.append((distance + radius_penalty, source_x, source_y))
+    if not candidates:
+        return center_x, center_y
+
+    _, best_x, best_y = min(candidates, key=lambda candidate: candidate[0])
+    jitter_tolerance = max(HOUGH_REFINEMENT_MIN_JITTER_PX, radius_px * HOUGH_REFINEMENT_JITTER_RATIO)
+    if np.hypot(best_x - center_x, best_y - center_y) <= jitter_tolerance:
+        return center_x, center_y
+
+    return best_x, best_y
+
+
+def _detect_source_bubble_circles(roi: np.ndarray, radius_px: float) -> list[tuple[float, float, float]]:
     red_mask = _red_overlay_mask(roi)
     roi[red_mask] = 255
     grayscale = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
@@ -396,24 +499,8 @@ def _refine_source_bubble_center(
         maxRadius=max(4, int(round(radius_px * 1.45))),
     )
     if circles is None:
-        return center_x, center_y
-
-    candidates: list[tuple[float, float, float]] = []
-    for circle_x, circle_y, circle_radius in circles[0]:
-        source_x = x0 + float(circle_x)
-        source_y = y0 + float(circle_y)
-        distance = float(np.hypot(source_x - center_x, source_y - center_y))
-        radius_penalty = abs(float(circle_radius) - radius_px) * 0.35
-        candidates.append((distance + radius_penalty, source_x, source_y))
-    if not candidates:
-        return center_x, center_y
-
-    _, best_x, best_y = min(candidates, key=lambda candidate: candidate[0])
-    jitter_tolerance = max(HOUGH_REFINEMENT_MIN_JITTER_PX, radius_px * HOUGH_REFINEMENT_JITTER_RATIO)
-    if np.hypot(best_x - center_x, best_y - center_y) <= jitter_tolerance:
-        return center_x, center_y
-
-    return best_x, best_y
+        return []
+    return [(float(circle_x), float(circle_y), float(circle_radius)) for circle_x, circle_y, circle_radius in circles[0]]
 
 
 def _red_overlay_mask(image: np.ndarray) -> np.ndarray:

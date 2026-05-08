@@ -17,7 +17,13 @@ from reportlab.pdfgen import canvas
 
 import omr.annotate as annotate_module
 from omr.cli import parse_choice_count, parse_question_count
-from omr.annotate import annotate_directory, annotate_pdf, load_correct_answers, _refine_source_bubble_center
+from omr.annotate import (
+    _answer_row_bubble_candidates,
+    _refine_source_bubble_center,
+    annotate_directory,
+    annotate_pdf,
+    load_correct_answers,
+)
 from omr.grade import (
     _AlignedSheet,
     UnsupportedSheetError,
@@ -634,6 +640,28 @@ def test_correct_answer_overlay_snaps_to_shifted_answer_bubbles(generated_tmp_di
     assert len(red_x) > 0
     assert abs(float(red_x.mean() - 10)) <= 1.0
     assert abs(float(red_y.mean() - 10)) <= 1.0
+
+
+def test_answer_row_refinement_prefers_bubble_row_over_option_labels() -> None:
+    candidates = [
+        (220.6, 1748.2, 15.8),
+        (241.0, 1726.6, 21.2),
+        (256.6, 1748.2, 15.8),
+        (278.2, 1721.8, 18.6),
+        (293.8, 1748.2, 15.8),
+        (315.4, 1721.8, 18.6),
+        (329.8, 1747.0, 16.2),
+        (345.4, 1726.6, 17.2),
+    ]
+
+    row_candidates = _answer_row_bubble_candidates(candidates, radius_px=15.0)
+
+    assert [(round(x, 1), round(y, 1)) for x, y, _ in row_candidates] == [
+        (220.6, 1748.2),
+        (256.6, 1748.2),
+        (293.8, 1748.2),
+        (329.8, 1747.0),
+    ]
 
 
 def test_bubble_center_refinement_ignores_hough_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
