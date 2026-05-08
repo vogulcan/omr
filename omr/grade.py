@@ -71,18 +71,26 @@ def _grade_pdf_with_alignment(
     image = _rasterize_pdf_page(pdf_path)
     try:
         aligned_sheet = _align_image_to_layout(image, layout)
-        page_binary = _threshold_image(aligned_sheet.page_aligned_image)
-        answer_binary = _threshold_image(aligned_sheet.answer_aligned_image)
-        student_id = _grade_student_id(page_binary, layout)
-        marked_answers = _grade_answers(answer_binary, layout)
     except UnsupportedSheetError as exc:
         raise UnsupportedSheetError(f"{pdf_path}: {exc}") from exc
+
+    page_binary = _threshold_image(aligned_sheet.page_aligned_image)
+    answer_binary = _threshold_image(aligned_sheet.answer_aligned_image)
+    marked_answers = _grade_answers(answer_binary, layout)
+
+    student_id = ""
+    student_id_error = ""
+    try:
+        student_id = _grade_student_id(page_binary, layout)
+    except UnsupportedSheetError as exc:
+        student_id_error = str(exc)
+
     return (
         GradeResult(
             qr_data=aligned_sheet.qr_data,
             student_id=student_id,
             marked_answers=marked_answers,
-            omr_error="",
+            omr_error=student_id_error,
         ),
         aligned_sheet,
     )
@@ -273,7 +281,7 @@ def _detect_page_marker_centers(binary: np.ndarray, layout: PageLayout) -> np.nd
         layout=layout,
         marker_centers=layout.corner_marker_centers(),
         marker_size_pt=layout.corner_marker_size,
-        roi_half_size_px=110,
+        roi_half_size_px=200,
     )
 
 
@@ -283,7 +291,7 @@ def _detect_answer_marker_centers(binary: np.ndarray, layout: PageLayout) -> np.
         layout=layout,
         marker_centers=layout.local_marker_centers(),
         marker_size_pt=layout.local_marker_size,
-        roi_half_size_px=80,
+        roi_half_size_px=120,
     )
 
 
