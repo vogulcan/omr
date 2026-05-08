@@ -14,14 +14,26 @@ import numpy as np
 from .layout import OPTION_LABELS, STUDENT_ID_COLUMNS, STUDENT_ID_ROWS, PageLayout
 
 OPTION_OUTLINE_THRESHOLD = 0.06
+OPTION_TRAILING_OUTLINE_THRESHOLD = 0.09
 MIN_MARK_SCORE = 0.10
-RELATIVE_MARK_THRESHOLD = 0.35
+RELATIVE_MARK_THRESHOLD = 0.60
+OPTION_MARK_MIN_SCORE = 0.45
+OPTION_WEAK_MARK_MIN_FILL_SCORE = 0.50
+OPTION_WEAK_MARK_MIN_OUTLINE_SCORE = 0.30
+OPTION_MULTI_MARK_MIN_TOP_SCORE = 0.75
 OUTLINE_LIFT_WEIGHT = 0.8
 ROW_PRESENCE_THRESHOLD = 0.05
 STUDENT_ID_MIN_SCORE = 0.25
 STUDENT_ID_DOMINANCE_RATIO = 1.8
+STUDENT_ID_MIN_SCORE_MARGIN = 0.18
+STUDENT_ID_ALIGNMENT_SEARCH_RADIUS_PT = 24.0
+STUDENT_ID_ALIGNMENT_COARSE_STEP_PT = 2.0
+STUDENT_ID_ALIGNMENT_FINE_RADIUS_PT = 3.0
+STUDENT_ID_ALIGNMENT_FINE_STEP_PT = 1.0
+STUDENT_ID_ALIGNMENT_OFFSET_PENALTY = 0.03
 QR_CROP_PADDING_PT = 8.0
 QR_CROP_SCALE_FACTORS = (1, 2, 3, 4)
+TOP_RIGHT_MARKER_MAX_DOWNWARD_DRIFT_RATIO = 2.5
 
 
 class UnsupportedSheetError(RuntimeError):
@@ -77,12 +89,13 @@ def _grade_pdf_with_alignment(
         raise UnsupportedSheetError(f"{pdf_path}: {exc}") from exc
 
     page_binary = _threshold_image(aligned_sheet.page_aligned_image)
-    marked_answers = _grade_answers(page_binary, layout)
+    answer_binary = _threshold_image(aligned_sheet.answer_aligned_image)
+    marked_answers = _grade_answers(answer_binary, layout)
 
     student_id = ""
     student_id_error = ""
     try:
-        student_id = _grade_student_id(page_binary, layout)
+        student_id = _grade_student_id_with_local_alignment(page_binary, layout)
     except UnsupportedSheetError as exc:
         student_id_error = str(exc)
 
@@ -123,7 +136,7 @@ def grade_directory(
                     qr_data=result.qr_data,
                     student_id=result.student_id,
                     marked_answers=result.marked_answers,
-                    omr_error="",
+                    omr_error=f"{pdf_path}: {result.omr_error}" if result.omr_error else "",
                 )
             )
         except Exception as exc:
@@ -307,7 +320,11 @@ def _detect_marker_centers(
     detected: list[tuple[float, float]] = []
     expected = _expected_marker_centers_px(binary, layout, marker_centers)
     scale = (binary.shape[1] / layout.page_width + binary.shape[0] / layout.page_height) / 2
-    min_area = max(20.0, (marker_size_pt * scale) ** 2 * 0.25)
+    expected_size = marker_size_pt * scale
+    expected_area = expected_size**2
+    min_size = expected_size * 0.45
+    max_size = expected_size * 1.80
+    min_area = max(20.0, expected_area * 0.18)
 
     for name, center in zip(marker_centers.keys(), expected, strict=True):
         cx, cy = center
@@ -324,24 +341,35 @@ def _detect_marker_centers(
             x, y, width, height = cv2.boundingRect(contour)
             if width == 0 or height == 0:
                 continue
+            if width < min_size or height < min_size or width > max_size or height > max_size:
+                continue
 
             aspect_ratio = width / height
             if not 0.65 <= aspect_ratio <= 1.35:
                 continue
 
             fill_ratio = area / float(width * height)
-            if fill_ratio < 0.45:
+            if fill_ratio < 0.25:
                 continue
 
             center_x = x0 + x + (width / 2.0)
             center_y = y0 + y + (height / 2.0)
-            distance_penalty = np.hypot(center_x - cx, center_y - cy) * 2.0
-            score = area - distance_penalty
+            distance_ratio = np.hypot(center_x - cx, center_y - cy) / expected_size
+            width_ratio = width / expected_size
+            height_ratio = height / expected_size
+            area_ratio = area / expected_area
+            size_penalty = abs(width_ratio - 1.0) + abs(height_ratio - 1.0)
+            score = area_ratio + fill_ratio - (1.10 * distance_ratio) - (0.85 * size_penalty)
             if score > best_score:
                 best_score = score
                 best_center = (center_x, center_y)
 
         if best_center is None:
+            raise UnsupportedSheetError(f"Required alignment marker '{name}' was not detected")
+        if (
+            name == "top_right"
+            and best_center[1] - cy > expected_size * TOP_RIGHT_MARKER_MAX_DOWNWARD_DRIFT_RATIO
+        ):
             raise UnsupportedSheetError(f"Required alignment marker '{name}' was not detected")
 
         detected.append(best_center)
@@ -383,23 +411,104 @@ def _similarity_transform_from_two_points(src: np.ndarray, dst: np.ndarray) -> n
     return cv2.getAffineTransform(src_points, dst_points)
 
 
-def _grade_student_id(binary: np.ndarray, layout: PageLayout) -> str:
+def _grade_student_id_with_local_alignment(binary: np.ndarray, layout: PageLayout) -> str:
+    try:
+        return _grade_student_id(binary, layout)
+    except UnsupportedSheetError:
+        offset_x, offset_y = _find_student_id_grid_offset(binary, layout)
+        last_error: UnsupportedSheetError | None = None
+        for candidate_x, candidate_y in _nearby_student_id_offsets(offset_x, offset_y):
+            try:
+                return _grade_student_id(binary, layout, offset_x=candidate_x, offset_y=candidate_y)
+            except UnsupportedSheetError as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        return _grade_student_id(binary, layout, offset_x=offset_x, offset_y=offset_y)
+
+
+def _grade_student_id(
+    binary: np.ndarray,
+    layout: PageLayout,
+    *,
+    offset_x: float = 0.0,
+    offset_y: float = 0.0,
+) -> str:
     digits: list[str] = []
     for column_index in range(STUDENT_ID_COLUMNS):
         column_scores: list[float] = []
         for row_index in range(STUDENT_ID_ROWS):
             center_x_pt, center_y_pt = layout.student_id_bubble_center(column_index, row_index)
-            column_scores.append(_fill_score(binary, layout, center_x_pt, center_y_pt))
+            column_scores.append(_fill_score(binary, layout, center_x_pt + offset_x, center_y_pt + offset_y))
         max_score = max(column_scores)
         if max_score < STUDENT_ID_MIN_SCORE:
             raise UnsupportedSheetError(f"Student ID column {column_index + 1} is empty")
         sorted_scores = sorted(column_scores, reverse=True)
         second_score = sorted_scores[1] if len(sorted_scores) > 1 else 0.0
         dominance = max_score / second_score if second_score > 0 else float("inf")
-        if dominance < STUDENT_ID_DOMINANCE_RATIO:
+        if dominance < STUDENT_ID_DOMINANCE_RATIO and max_score - second_score < STUDENT_ID_MIN_SCORE_MARGIN:
             raise UnsupportedSheetError(f"Student ID column {column_index + 1} has multiple marks")
         digits.append(str(column_scores.index(max_score)))
     return "".join(digits)
+
+
+def _find_student_id_grid_offset(binary: np.ndarray, layout: PageLayout) -> tuple[float, float]:
+    best_score = float("-inf")
+    best_offset = (0.0, 0.0)
+
+    for offset_x, offset_y in _iter_offset_grid(
+        -STUDENT_ID_ALIGNMENT_SEARCH_RADIUS_PT,
+        STUDENT_ID_ALIGNMENT_SEARCH_RADIUS_PT,
+        STUDENT_ID_ALIGNMENT_COARSE_STEP_PT,
+    ):
+        score = _student_id_grid_outline_score(binary, layout, offset_x, offset_y)
+        if score > best_score:
+            best_score = score
+            best_offset = (offset_x, offset_y)
+
+    coarse_x, coarse_y = best_offset
+    fine_min_x = coarse_x - STUDENT_ID_ALIGNMENT_FINE_RADIUS_PT
+    fine_max_x = coarse_x + STUDENT_ID_ALIGNMENT_FINE_RADIUS_PT
+    fine_min_y = coarse_y - STUDENT_ID_ALIGNMENT_FINE_RADIUS_PT
+    fine_max_y = coarse_y + STUDENT_ID_ALIGNMENT_FINE_RADIUS_PT
+    for offset_x in _iter_float_range(fine_min_x, fine_max_x, STUDENT_ID_ALIGNMENT_FINE_STEP_PT):
+        for offset_y in _iter_float_range(fine_min_y, fine_max_y, STUDENT_ID_ALIGNMENT_FINE_STEP_PT):
+            score = _student_id_grid_outline_score(binary, layout, offset_x, offset_y)
+            if score > best_score:
+                best_score = score
+                best_offset = (offset_x, offset_y)
+
+    return best_offset
+
+
+def _nearby_student_id_offsets(offset_x: float, offset_y: float):
+    candidates: list[tuple[float, float]] = []
+    for delta_x in (-1.0, 0.0, 1.0):
+        for delta_y in (-1.0, 0.0, 1.0):
+            candidates.append((offset_x + delta_x, offset_y + delta_y))
+    return sorted(candidates, key=lambda point: np.hypot(point[0] - offset_x, point[1] - offset_y))
+
+
+def _student_id_grid_outline_score(binary: np.ndarray, layout: PageLayout, offset_x: float, offset_y: float) -> float:
+    total = 0.0
+    for column_index in range(STUDENT_ID_COLUMNS):
+        for row_index in range(STUDENT_ID_ROWS):
+            center_x_pt, center_y_pt = layout.student_id_bubble_center(column_index, row_index)
+            total += _outline_score(binary, layout, center_x_pt + offset_x, center_y_pt + offset_y)
+    return total - (STUDENT_ID_ALIGNMENT_OFFSET_PENALTY * np.hypot(offset_x, offset_y))
+
+
+def _iter_offset_grid(minimum: float, maximum: float, step: float):
+    for offset_x in _iter_float_range(minimum, maximum, step):
+        for offset_y in _iter_float_range(minimum, maximum, step):
+            yield offset_x, offset_y
+
+
+def _iter_float_range(minimum: float, maximum: float, step: float):
+    value = minimum
+    while value <= maximum + (step / 2.0):
+        yield float(value)
+        value += step
 
 
 def _marked_student_digit_indexes(fill_scores: list[float]) -> list[int]:
@@ -434,7 +543,7 @@ def _grade_answers(binary: np.ndarray, layout: PageLayout) -> dict[str, list[str
                 fill_scores.append(_fill_score(binary, layout, center_x_pt, center_y_pt))
                 option_presence.append(outline_score > OPTION_OUTLINE_THRESHOLD)
 
-            option_count = _infer_option_count(option_presence)
+            option_count = _infer_option_count(outline_scores)
             if option_count == 0:
                 continue
 
@@ -457,11 +566,14 @@ def _answer_row_outline_sum(binary: np.ndarray, layout: PageLayout, column_index
     return total
 
 
-def _infer_option_count(option_presence: list[bool]) -> int:
-    present_indexes = [index for index, present in enumerate(option_presence) if present]
+def _infer_option_count(outline_scores: list[float]) -> int:
+    present_indexes = [index for index, score in enumerate(outline_scores) if score > OPTION_OUTLINE_THRESHOLD]
     if len(present_indexes) < 2:
         return 0
-    return present_indexes[-1] + 1
+    option_count = present_indexes[-1] + 1
+    while option_count > 2 and outline_scores[option_count - 1] < OPTION_TRAILING_OUTLINE_THRESHOLD:
+        option_count -= 1
+    return option_count
 
 
 def _marked_option_indexes(
@@ -482,11 +594,23 @@ def _marked_option_indexes(
         mark_scores.append(fill_score + (OUTLINE_LIFT_WEIGHT * outline_lift))
 
     max_score = max(mark_scores)
-    if max_score < MIN_MARK_SCORE:
+    if max_score < OPTION_MARK_MIN_SCORE:
         return []
 
-    threshold = max(MIN_MARK_SCORE, max_score * RELATIVE_MARK_THRESHOLD)
-    return [index for index, score in enumerate(mark_scores) if score >= threshold]
+    threshold = max(OPTION_MARK_MIN_SCORE, max_score * RELATIVE_MARK_THRESHOLD)
+    marked = []
+    for index, score in enumerate(mark_scores):
+        if score >= threshold:
+            marked.append(index)
+        elif (
+            score >= OPTION_MARK_MIN_SCORE
+            and fill_scores[index] >= OPTION_WEAK_MARK_MIN_FILL_SCORE
+            and outline_scores[index] >= OPTION_WEAK_MARK_MIN_OUTLINE_SCORE
+        ):
+            marked.append(index)
+    if len(marked) > 1 and max_score < OPTION_MULTI_MARK_MIN_TOP_SCORE:
+        return [int(np.argmax(mark_scores))]
+    return marked
 
 
 def _outline_score(binary: np.ndarray, layout: PageLayout, center_x_pt: float, center_y_pt: float) -> float:

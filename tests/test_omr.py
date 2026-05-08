@@ -419,8 +419,10 @@ def test_grade_answer1_pdf(sample_pdfs: dict[str, Path]) -> None:
 
 
 def test_grade_pdf_rejects_empty_student_id_column(sample_pdfs: dict[str, Path]) -> None:
-    with pytest.raises(UnsupportedSheetError, match="Student ID column 8 is empty"):
-        grade_pdf(sample_pdfs["missing_student_digit"])
+    result = grade_pdf(sample_pdfs["missing_student_digit"])
+
+    assert result.student_id == ""
+    assert "Student ID column 8 is empty" in result.omr_error
 
 
 def test_grade_directory_reads_all_pdfs(generated_tmp_dir: Path, sample_pdfs: dict[str, Path]) -> None:
@@ -447,7 +449,7 @@ def test_grade_directory_continues_when_one_pdf_fails(generated_tmp_dir: Path, s
     assert results[0].student_id == "63620147"
     assert results[0].omr_error == ""
     assert results[1].student_id == ""
-    assert results[1].marked_answers == {}
+    assert results[1].marked_answers["3"] == ["B", "D"]
     assert "student-b.pdf" in results[1].omr_error
     assert "Student ID column 8 is empty" in results[1].omr_error
 
