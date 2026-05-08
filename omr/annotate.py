@@ -20,8 +20,7 @@ HOUGH_REFINEMENT_JITTER_RATIO = 0.30
 HOUGH_REFINEMENT_MIN_JITTER_PX = 1.5
 ANSWER_ROW_REFINEMENT_X_PADDING_RATIO = 2.2
 ANSWER_ROW_REFINEMENT_Y_PADDING_RATIO = 1.8
-ANSWER_ROW_BUBBLE_CLUSTER_MIN_SPAN_RATIO = 0.9
-ANSWER_ROW_BUBBLE_CLUSTER_SPLIT_RATIO = 0.45
+ANSWER_ROW_Y_TOLERANCE_RATIO = 1.0
 ANSWER_ROW_CANDIDATE_MERGE_RATIO = 0.9
 
 
@@ -405,6 +404,9 @@ def _refine_source_answer_option_center(
 
     circles = _detect_source_bubble_circles(image[y0:y1, x0:x1].copy(), radius_px)
     candidates = [(x0 + circle_x, y0 + circle_y, circle_radius) for circle_x, circle_y, circle_radius in circles]
+    expected_row_y = sum(y_values) / len(y_values)
+    y_tolerance = radius_px * ANSWER_ROW_Y_TOLERANCE_RATIO
+    candidates = [candidate for candidate in candidates if abs(candidate[1] - expected_row_y) <= y_tolerance]
     row_candidates = _answer_row_bubble_candidates(candidates, radius_px)
     if row_candidates:
         candidate_x, candidate_y, _ = min(
@@ -421,17 +423,8 @@ def _answer_row_bubble_candidates(
 ) -> list[tuple[float, float, float]]:
     if not candidates:
         return []
-    y_values = [candidate[1] for candidate in candidates]
-    y_span = max(y_values) - min(y_values)
-    row_candidates = candidates
-    if y_span >= radius_px * ANSWER_ROW_BUBBLE_CLUSTER_MIN_SPAN_RATIO:
-        split_y = min(y_values) + (y_span * ANSWER_ROW_BUBBLE_CLUSTER_SPLIT_RATIO)
-        lower_candidates = [candidate for candidate in candidates if candidate[1] >= split_y]
-        if len(lower_candidates) >= 2:
-            row_candidates = lower_candidates
-
     merged: list[tuple[float, float, float]] = []
-    for candidate in sorted(row_candidates, key=lambda item: (item[0], item[1])):
+    for candidate in sorted(candidates, key=lambda item: (item[0], item[1])):
         if merged and abs(candidate[0] - merged[-1][0]) <= radius_px * ANSWER_ROW_CANDIDATE_MERGE_RATIO:
             previous = merged[-1]
             if candidate[2] > previous[2]:
