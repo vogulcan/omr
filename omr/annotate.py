@@ -406,9 +406,6 @@ def _refine_source_answer_option_center(
     circles = _detect_source_bubble_circles(image[y0:y1, x0:x1].copy(), radius_px)
     candidates = [(x0 + circle_x, y0 + circle_y, circle_radius) for circle_x, circle_y, circle_radius in circles]
     row_candidates = _answer_row_bubble_candidates(candidates, radius_px)
-    if len(row_candidates) > option_index:
-        candidate_x, candidate_y, _ = sorted(row_candidates, key=lambda candidate: candidate[0])[option_index]
-        return candidate_x, candidate_y
     if row_candidates:
         candidate_x, candidate_y, _ = min(
             row_candidates,
