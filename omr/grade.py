@@ -13,11 +13,13 @@ import numpy as np
 
 from .layout import OPTION_LABELS, STUDENT_ID_COLUMNS, STUDENT_ID_ROWS, PageLayout
 
-OPTION_OUTLINE_THRESHOLD = 0.10
+OPTION_OUTLINE_THRESHOLD = 0.06
 MIN_MARK_SCORE = 0.10
 RELATIVE_MARK_THRESHOLD = 0.35
 OUTLINE_LIFT_WEIGHT = 0.8
 ROW_PRESENCE_THRESHOLD = 0.05
+STUDENT_ID_MIN_SCORE = 0.25
+STUDENT_ID_DOMINANCE_RATIO = 1.8
 QR_CROP_PADDING_PT = 8.0
 QR_CROP_SCALE_FACTORS = (1, 2, 3, 4)
 
@@ -75,8 +77,7 @@ def _grade_pdf_with_alignment(
         raise UnsupportedSheetError(f"{pdf_path}: {exc}") from exc
 
     page_binary = _threshold_image(aligned_sheet.page_aligned_image)
-    answer_binary = _threshold_image(aligned_sheet.answer_aligned_image)
-    marked_answers = _grade_answers(answer_binary, layout)
+    marked_answers = _grade_answers(page_binary, layout)
 
     student_id = ""
     student_id_error = ""
@@ -389,12 +390,15 @@ def _grade_student_id(binary: np.ndarray, layout: PageLayout) -> str:
         for row_index in range(STUDENT_ID_ROWS):
             center_x_pt, center_y_pt = layout.student_id_bubble_center(column_index, row_index)
             column_scores.append(_fill_score(binary, layout, center_x_pt, center_y_pt))
-        marked_indexes = _marked_student_digit_indexes(column_scores)
-        if not marked_indexes:
+        max_score = max(column_scores)
+        if max_score < STUDENT_ID_MIN_SCORE:
             raise UnsupportedSheetError(f"Student ID column {column_index + 1} is empty")
-        if len(marked_indexes) > 1:
+        sorted_scores = sorted(column_scores, reverse=True)
+        second_score = sorted_scores[1] if len(sorted_scores) > 1 else 0.0
+        dominance = max_score / second_score if second_score > 0 else float("inf")
+        if dominance < STUDENT_ID_DOMINANCE_RATIO:
             raise UnsupportedSheetError(f"Student ID column {column_index + 1} has multiple marks")
-        digits.append(str(marked_indexes[0]))
+        digits.append(str(column_scores.index(max_score)))
     return "".join(digits)
 
 
