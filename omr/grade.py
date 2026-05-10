@@ -701,9 +701,10 @@ def _answer_row_contour_offset(
     if best_offset_px is None:
         return None
     offset_x_pt = best_offset_px[0] / (binary.shape[1] / layout.page_width)
+    offset_y_pt = -best_offset_px[1] / (binary.shape[0] / layout.page_height)
     if abs(offset_x_pt) > ANSWER_COLUMN_ALIGNMENT_SEARCH_RADIUS_PT:
         return None
-    return offset_x_pt, 0.0
+    return offset_x_pt, offset_y_pt
 
 
 def _answer_row_candidate_centers(
