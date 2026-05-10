@@ -517,7 +517,7 @@ def test_grade_four_choice_sheet_with_shifted_answer_bubbles_does_not_create_e_m
         answers={1: ["D"], 6: ["D"]},
         student_id="00038145",
         row_count=10,
-        shift_x=7.0,
+        shift_x=14.0,
         option_count=4,
     )
 

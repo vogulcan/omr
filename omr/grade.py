@@ -26,7 +26,7 @@ OUTLINE_LIFT_WEIGHT = 0.8
 ROW_PRESENCE_THRESHOLD = 0.05
 SHEET_OPTION_PRESENCE_RATIO = 0.70
 SHEET_OPTION_MIN_MEDIAN_OUTLINE_SCORE = 0.12
-ANSWER_COLUMN_ALIGNMENT_SEARCH_RADIUS_PT = 12.0
+ANSWER_COLUMN_ALIGNMENT_SEARCH_RADIUS_PT = 18.0
 ANSWER_COLUMN_ALIGNMENT_STEP_PT = 0.5
 ANSWER_COLUMN_ALIGNMENT_LOWER_QUANTILE_WEIGHT = 0.25
 ANSWER_ROW_CONTOUR_SEARCH_PADDING_PT = 12.0
@@ -547,7 +547,7 @@ def _grade_answers(binary: np.ndarray, layout: PageLayout) -> dict[str, list[str
     if not answer_rows:
         return answers
 
-    option_count = _infer_sheet_option_count(answer_rows)
+    option_count = _infer_sheet_option_count(binary, layout, answer_rows)
     row_offsets = _answer_row_offsets(binary, layout, answer_rows, option_count)
 
     for answer_row in answer_rows:
@@ -598,9 +598,30 @@ def _detect_answer_rows(binary: np.ndarray, layout: PageLayout) -> list[_AnswerR
     return answer_rows
 
 
-def _infer_sheet_option_count(answer_rows: list[_AnswerRow]) -> int:
+def _infer_sheet_option_count(
+    binary: np.ndarray,
+    layout: PageLayout,
+    answer_rows: list[_AnswerRow],
+) -> int:
     if not answer_rows:
         return 0
+
+    contour_counts: list[int] = []
+    for answer_row in answer_rows:
+        candidate_count = len(
+            _answer_row_candidate_centers(
+                binary,
+                layout,
+                answer_row.column_index,
+                answer_row.row_index,
+            )
+        )
+        if 2 <= candidate_count <= len(OPTION_LABELS):
+            contour_counts.append(candidate_count)
+    if contour_counts:
+        unique_counts, frequencies = np.unique(np.array(contour_counts, dtype=np.int32), return_counts=True)
+        max_frequency = int(frequencies.max())
+        return int(max(unique_counts[index] for index, frequency in enumerate(frequencies) if frequency == max_frequency))
 
     outline_matrix = np.array([row.outline_scores for row in answer_rows], dtype=np.float32)
     option_count = 0
@@ -655,34 +676,7 @@ def _answer_row_contour_offset(
         layout,
         *layout.answer_option_center(column_index, row_index, 0),
     )
-    search_padding_px = ANSWER_ROW_CONTOUR_SEARCH_PADDING_PT * (binary.shape[1] / layout.page_width)
-    x0 = max(0, int(floor(expected_centers_px[0] - search_padding_px - (radius_px * 1.5))))
-    x1 = min(binary.shape[1], int(ceil(expected_centers_px[-1] + search_padding_px + (radius_px * 1.5))))
-    y0 = max(0, int(floor(center_y_px - (radius_px * 1.6))))
-    y1 = min(binary.shape[0], int(ceil(center_y_px + (radius_px * 1.6))))
-    if x1 <= x0 or y1 <= y0:
-        return None
-
-    roi = binary[y0:y1, x0:x1]
-    contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    min_size = radius_px * ANSWER_ROW_CONTOUR_MIN_SIZE_RATIO
-    max_size = radius_px * ANSWER_ROW_CONTOUR_MAX_SIZE_RATIO
-    min_area = max(20.0, (radius_px**2) * ANSWER_ROW_CONTOUR_MIN_AREA_RATIO)
-    candidate_centers: list[tuple[float, float]] = []
-
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area < min_area:
-            continue
-        x, y, width, height = cv2.boundingRect(contour)
-        if width < min_size or height < min_size or width > max_size or height > max_size:
-            continue
-        aspect_ratio = width / height if height else 0.0
-        if not 0.55 <= aspect_ratio <= 1.65:
-            continue
-        center_x = x0 + x + (width / 2.0)
-        center_y = y0 + y + (height / 2.0)
-        candidate_centers.append((center_x, center_y))
+    candidate_centers = _answer_row_candidate_centers(binary, layout, column_index, row_index)
 
     if len(candidate_centers) < option_count:
         return None
@@ -710,6 +704,53 @@ def _answer_row_contour_offset(
     if abs(offset_x_pt) > ANSWER_COLUMN_ALIGNMENT_SEARCH_RADIUS_PT:
         return None
     return offset_x_pt, 0.0
+
+
+def _answer_row_candidate_centers(
+    binary: np.ndarray,
+    layout: PageLayout,
+    column_index: int,
+    row_index: int,
+) -> list[tuple[float, float]]:
+    expected_centers_px = [
+        _bubble_geometry_px(binary, layout, *layout.answer_option_center(column_index, row_index, option_index))[0]
+        for option_index in range(len(OPTION_LABELS))
+    ]
+    _, center_y_px, radius_px = _bubble_geometry_px(
+        binary,
+        layout,
+        *layout.answer_option_center(column_index, row_index, 0),
+    )
+    search_padding_px = ANSWER_ROW_CONTOUR_SEARCH_PADDING_PT * (binary.shape[1] / layout.page_width)
+    x0 = max(0, int(floor(expected_centers_px[0] - search_padding_px - (radius_px * 1.5))))
+    x1 = min(binary.shape[1], int(ceil(expected_centers_px[-1] + search_padding_px + (radius_px * 1.5))))
+    y0 = max(0, int(floor(center_y_px - (radius_px * 1.6))))
+    y1 = min(binary.shape[0], int(ceil(center_y_px + (radius_px * 1.6))))
+    if x1 <= x0 or y1 <= y0:
+        return []
+
+    roi = binary[y0:y1, x0:x1]
+    contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    min_size = radius_px * ANSWER_ROW_CONTOUR_MIN_SIZE_RATIO
+    max_size = radius_px * ANSWER_ROW_CONTOUR_MAX_SIZE_RATIO
+    min_area = max(20.0, (radius_px**2) * ANSWER_ROW_CONTOUR_MIN_AREA_RATIO)
+    candidate_centers: list[tuple[float, float]] = []
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < min_area:
+            continue
+        x, y, width, height = cv2.boundingRect(contour)
+        if width < min_size or height < min_size or width > max_size or height > max_size:
+            continue
+        aspect_ratio = width / height if height else 0.0
+        if not 0.55 <= aspect_ratio <= 1.65:
+            continue
+        center_x = x0 + x + (width / 2.0)
+        center_y = y0 + y + (height / 2.0)
+        candidate_centers.append((center_x, center_y))
+
+    return sorted(candidate_centers)
 
 
 def _answer_row_outline_offset(
