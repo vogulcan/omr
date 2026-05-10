@@ -423,6 +423,24 @@ def _answer_row_bubble_candidates(
 ) -> list[tuple[float, float, float]]:
     if not candidates:
         return []
+    y_tolerance = radius_px * ANSWER_ROW_Y_TOLERANCE_RATIO
+    clusters: list[list[tuple[float, float, float]]] = []
+    for candidate in sorted(candidates, key=lambda item: item[1]):
+        for cluster in clusters:
+            cluster_y = float(np.median([item[1] for item in cluster]))
+            if abs(candidate[1] - cluster_y) <= y_tolerance:
+                cluster.append(candidate)
+                break
+        else:
+            clusters.append([candidate])
+
+    candidates = max(
+        clusters,
+        key=lambda cluster: (
+            len(cluster),
+            -float(np.mean([abs(item[2] - radius_px) for item in cluster])),
+        ),
+    )
     merged: list[tuple[float, float, float]] = []
     for candidate in sorted(candidates, key=lambda item: (item[0], item[1])):
         if merged and abs(candidate[0] - merged[-1][0]) <= radius_px * ANSWER_ROW_CANDIDATE_MERGE_RATIO:

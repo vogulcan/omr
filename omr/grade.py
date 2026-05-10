@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from itertools import combinations
 import json
 from math import ceil, floor
 import subprocess
@@ -23,6 +24,15 @@ OPTION_WEAK_MARK_MIN_OUTLINE_SCORE = 0.30
 OPTION_MULTI_MARK_MIN_TOP_SCORE = 0.75
 OUTLINE_LIFT_WEIGHT = 0.8
 ROW_PRESENCE_THRESHOLD = 0.05
+SHEET_OPTION_PRESENCE_RATIO = 0.70
+SHEET_OPTION_MIN_MEDIAN_OUTLINE_SCORE = 0.12
+ANSWER_COLUMN_ALIGNMENT_SEARCH_RADIUS_PT = 12.0
+ANSWER_COLUMN_ALIGNMENT_STEP_PT = 0.5
+ANSWER_COLUMN_ALIGNMENT_LOWER_QUANTILE_WEIGHT = 0.25
+ANSWER_ROW_CONTOUR_SEARCH_PADDING_PT = 12.0
+ANSWER_ROW_CONTOUR_MIN_SIZE_RATIO = 1.05
+ANSWER_ROW_CONTOUR_MAX_SIZE_RATIO = 3.50
+ANSWER_ROW_CONTOUR_MIN_AREA_RATIO = 0.30
 STUDENT_ID_MIN_SCORE = 0.25
 STUDENT_ID_DOMINANCE_RATIO = 1.8
 STUDENT_ID_MIN_SCORE_MARGIN = 0.18
@@ -66,6 +76,13 @@ class _AlignedSheet:
     answer_aligned_to_source_transform: np.ndarray
     source_image_width_px: int
     source_image_height_px: int
+
+
+@dataclass(frozen=True, slots=True)
+class _AnswerRow:
+    column_index: int
+    row_index: int
+    outline_scores: tuple[float, ...]
 
 
 def grade_pdf(
@@ -526,54 +543,221 @@ def _marked_student_digit_indexes(fill_scores: list[float]) -> list[int]:
 def _grade_answers(binary: np.ndarray, layout: PageLayout) -> dict[str, list[str]]:
     answers: dict[str, list[str]] = {}
     question_number = 1
+    answer_rows = _detect_answer_rows(binary, layout)
+    if not answer_rows:
+        return answers
 
-    for column_index in range(layout.answer_columns_per_page):
-        for row_index in range(layout.questions_per_column):
-            row_outline_sum = _answer_row_outline_sum(binary, layout, column_index, row_index)
-            if row_outline_sum <= ROW_PRESENCE_THRESHOLD:
-                continue
+    option_count = _infer_sheet_option_count(answer_rows)
+    row_offsets = _answer_row_offsets(binary, layout, answer_rows, option_count)
 
-            fill_scores: list[float] = []
-            outline_scores: list[float] = []
-            option_presence: list[bool] = []
-            for option_index in range(len(OPTION_LABELS)):
-                center_x_pt, center_y_pt = layout.answer_option_center(column_index, row_index, option_index)
-                outline_score = _outline_score(binary, layout, center_x_pt, center_y_pt)
-                outline_scores.append(outline_score)
-                fill_scores.append(_fill_score(binary, layout, center_x_pt, center_y_pt))
-                option_presence.append(outline_score > OPTION_OUTLINE_THRESHOLD)
+    for answer_row in answer_rows:
+        column_index = answer_row.column_index
+        row_index = answer_row.row_index
+        offset_x, offset_y = row_offsets.get((column_index, row_index), (0.0, 0.0))
 
-            option_count = _infer_option_count(outline_scores)
-            if option_count == 0:
-                continue
+        fill_scores: list[float] = []
+        outline_scores: list[float] = []
+        option_presence: list[bool] = []
+        for option_index in range(option_count):
+            center_x_pt, center_y_pt = layout.answer_option_center(column_index, row_index, option_index)
+            center_x_pt += offset_x
+            center_y_pt += offset_y
+            outline_score = _outline_score(binary, layout, center_x_pt, center_y_pt)
+            outline_scores.append(outline_score)
+            fill_scores.append(_fill_score(binary, layout, center_x_pt, center_y_pt))
+            option_presence.append(outline_score > OPTION_OUTLINE_THRESHOLD)
 
-            marked = _marked_option_indexes(
-                fill_scores[:option_count],
-                option_presence[:option_count],
-                outline_scores[:option_count],
-            )
-            answers[str(question_number)] = [OPTION_LABELS[index] for index in marked]
-            question_number += 1
+        marked = _marked_option_indexes(fill_scores, option_presence, outline_scores)
+        answers[str(question_number)] = [OPTION_LABELS[index] for index in marked]
+        question_number += 1
 
     return answers
 
 
-def _answer_row_outline_sum(binary: np.ndarray, layout: PageLayout, column_index: int, row_index: int) -> float:
-    total = 0.0
-    for option_index in range(len(OPTION_LABELS)):
-        center_x_pt, center_y_pt = layout.answer_option_center(column_index, row_index, option_index)
-        total += _outline_score(binary, layout, center_x_pt, center_y_pt)
-    return total
+def _detect_answer_rows(binary: np.ndarray, layout: PageLayout) -> list[_AnswerRow]:
+    answer_rows: list[_AnswerRow] = []
+    for column_index in range(layout.answer_columns_per_page):
+        for row_index in range(layout.questions_per_column):
+            outline_scores = tuple(
+                _outline_score(
+                    binary,
+                    layout,
+                    *layout.answer_option_center(column_index, row_index, option_index),
+                )
+                for option_index in range(len(OPTION_LABELS))
+            )
+            if sum(outline_scores) <= ROW_PRESENCE_THRESHOLD:
+                continue
+            answer_rows.append(
+                _AnswerRow(
+                    column_index=column_index,
+                    row_index=row_index,
+                    outline_scores=outline_scores,
+                )
+            )
+    return answer_rows
 
 
-def _infer_option_count(outline_scores: list[float]) -> int:
-    present_indexes = [index for index, score in enumerate(outline_scores) if score > OPTION_OUTLINE_THRESHOLD]
-    if len(present_indexes) < 2:
+def _infer_sheet_option_count(answer_rows: list[_AnswerRow]) -> int:
+    if not answer_rows:
         return 0
-    option_count = present_indexes[-1] + 1
-    while option_count > 2 and outline_scores[option_count - 1] < OPTION_TRAILING_OUTLINE_THRESHOLD:
-        option_count -= 1
-    return option_count
+
+    outline_matrix = np.array([row.outline_scores for row in answer_rows], dtype=np.float32)
+    option_count = 0
+    for option_index in range(outline_matrix.shape[1]):
+        option_scores = outline_matrix[:, option_index]
+        presence_ratio = float(np.count_nonzero(option_scores > OPTION_TRAILING_OUTLINE_THRESHOLD)) / len(option_scores)
+        median_outline_score = float(np.median(option_scores))
+        if (
+            presence_ratio >= SHEET_OPTION_PRESENCE_RATIO
+            or median_outline_score >= SHEET_OPTION_MIN_MEDIAN_OUTLINE_SCORE
+        ):
+            option_count = option_index + 1
+    return min(len(OPTION_LABELS), max(2, option_count))
+
+
+def _answer_row_offsets(
+    binary: np.ndarray,
+    layout: PageLayout,
+    answer_rows: list[_AnswerRow],
+    option_count: int,
+) -> dict[tuple[int, int], tuple[float, float]]:
+    offsets: dict[tuple[int, int], tuple[float, float]] = {}
+    for answer_row in answer_rows:
+        contour_offset = _answer_row_contour_offset(binary, layout, answer_row, option_count)
+        if contour_offset is not None:
+            offsets[(answer_row.column_index, answer_row.row_index)] = contour_offset
+            continue
+        offsets[(answer_row.column_index, answer_row.row_index)] = _answer_row_outline_offset(
+            binary,
+            layout,
+            answer_row.column_index,
+            answer_row.row_index,
+            option_count,
+        )
+    return offsets
+
+
+def _answer_row_contour_offset(
+    binary: np.ndarray,
+    layout: PageLayout,
+    answer_row: _AnswerRow,
+    option_count: int,
+) -> tuple[float, float] | None:
+    column_index = answer_row.column_index
+    row_index = answer_row.row_index
+    expected_centers_px = [
+        _bubble_geometry_px(binary, layout, *layout.answer_option_center(column_index, row_index, option_index))[0]
+        for option_index in range(option_count)
+    ]
+    _, center_y_px, radius_px = _bubble_geometry_px(
+        binary,
+        layout,
+        *layout.answer_option_center(column_index, row_index, 0),
+    )
+    search_padding_px = ANSWER_ROW_CONTOUR_SEARCH_PADDING_PT * (binary.shape[1] / layout.page_width)
+    x0 = max(0, int(floor(expected_centers_px[0] - search_padding_px - (radius_px * 1.5))))
+    x1 = min(binary.shape[1], int(ceil(expected_centers_px[-1] + search_padding_px + (radius_px * 1.5))))
+    y0 = max(0, int(floor(center_y_px - (radius_px * 1.6))))
+    y1 = min(binary.shape[0], int(ceil(center_y_px + (radius_px * 1.6))))
+    if x1 <= x0 or y1 <= y0:
+        return None
+
+    roi = binary[y0:y1, x0:x1]
+    contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    min_size = radius_px * ANSWER_ROW_CONTOUR_MIN_SIZE_RATIO
+    max_size = radius_px * ANSWER_ROW_CONTOUR_MAX_SIZE_RATIO
+    min_area = max(20.0, (radius_px**2) * ANSWER_ROW_CONTOUR_MIN_AREA_RATIO)
+    candidate_centers: list[tuple[float, float]] = []
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < min_area:
+            continue
+        x, y, width, height = cv2.boundingRect(contour)
+        if width < min_size or height < min_size or width > max_size or height > max_size:
+            continue
+        aspect_ratio = width / height if height else 0.0
+        if not 0.55 <= aspect_ratio <= 1.65:
+            continue
+        center_x = x0 + x + (width / 2.0)
+        center_y = y0 + y + (height / 2.0)
+        candidate_centers.append((center_x, center_y))
+
+    if len(candidate_centers) < option_count:
+        return None
+
+    expected_x = np.array(expected_centers_px, dtype=np.float32)
+    expected_y = np.array([center_y_px] * option_count, dtype=np.float32)
+    best_offset_px: tuple[float, float] | None = None
+    best_error = float("inf")
+    for centers in combinations(sorted(candidate_centers), option_count):
+        detected = np.array(centers, dtype=np.float32)
+        offsets_x = detected[:, 0] - expected_x
+        offsets_y = detected[:, 1] - expected_y
+        offset_x_px = float(np.median(offsets_x))
+        offset_y_px = float(np.median(offsets_y))
+        error = float(np.median(np.abs(offsets_x - offset_x_px))) + (
+            0.5 * float(np.median(np.abs(offsets_y - offset_y_px)))
+        )
+        if error < best_error:
+            best_error = error
+            best_offset_px = (offset_x_px, offset_y_px)
+
+    if best_offset_px is None:
+        return None
+    offset_x_pt = best_offset_px[0] / (binary.shape[1] / layout.page_width)
+    if abs(offset_x_pt) > ANSWER_COLUMN_ALIGNMENT_SEARCH_RADIUS_PT:
+        return None
+    return offset_x_pt, 0.0
+
+
+def _answer_row_outline_offset(
+    binary: np.ndarray,
+    layout: PageLayout,
+    column_index: int,
+    row_index: int,
+    option_count: int,
+) -> tuple[float, float]:
+    best_score = float("-inf")
+    best_offset = 0.0
+    for offset_x in _iter_float_range(
+        -ANSWER_COLUMN_ALIGNMENT_SEARCH_RADIUS_PT,
+        ANSWER_COLUMN_ALIGNMENT_SEARCH_RADIUS_PT,
+        ANSWER_COLUMN_ALIGNMENT_STEP_PT,
+    ):
+        score = _answer_row_alignment_score(
+            binary,
+            layout,
+            column_index,
+            row_index,
+            option_count,
+            offset_x,
+        )
+        if score > best_score:
+            best_score = score
+            best_offset = offset_x
+    return best_offset, 0.0
+
+
+def _answer_row_alignment_score(
+    binary: np.ndarray,
+    layout: PageLayout,
+    column_index: int,
+    row_index: int,
+    option_count: int,
+    offset_x: float,
+) -> float:
+    outline_scores: list[float] = []
+    for option_index in range(option_count):
+        center_x_pt, center_y_pt = layout.answer_option_center(column_index, row_index, option_index)
+        outline_scores.append(_outline_score(binary, layout, center_x_pt + offset_x, center_y_pt))
+
+    if not outline_scores:
+        return 0.0
+    return float(np.median(outline_scores)) + (
+        ANSWER_COLUMN_ALIGNMENT_LOWER_QUANTILE_WEIGHT * float(np.quantile(outline_scores, 0.25))
+    )
 
 
 def _marked_option_indexes(
@@ -608,6 +792,16 @@ def _marked_option_indexes(
             and outline_scores[index] >= OPTION_WEAK_MARK_MIN_OUTLINE_SCORE
         ):
             marked.append(index)
+    if len(marked) > 1:
+        strong_outline_indexes = {
+            index for index in marked if outline_scores[index] >= OPTION_WEAK_MARK_MIN_OUTLINE_SCORE
+        }
+        if strong_outline_indexes:
+            marked = [
+                index
+                for index in marked
+                if index in strong_outline_indexes or fill_scores[index] >= OPTION_MULTI_MARK_MIN_TOP_SCORE
+            ]
     if len(marked) > 1 and max_score < OPTION_MULTI_MARK_MIN_TOP_SCORE:
         return [int(np.argmax(mark_scores))]
     return marked

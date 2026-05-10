@@ -66,13 +66,15 @@ def _write_shifted_answer_rows_pdf(
     answers: dict[int, list[str]],
     student_id: str,
     row_count: int,
-    shift_y: float,
+    shift_x: float = 0.0,
+    shift_y: float = 0.0,
+    option_count: int = 5,
 ) -> None:
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=(layout.page_width, layout.page_height))
     column_x = layout.margin
-    erase_left = column_x - 4
-    erase_right = column_x + layout.question_block_width + 4
+    erase_left = column_x - 4 + min(shift_x, 0.0)
+    erase_right = column_x + layout.question_block_width + 4 + max(shift_x, 0.0)
     erase_top = layout.answer_top_y + 18
     erase_bottom = layout.answer_top_y - ((row_count - 1) * layout.answer_row_height) - 18 + shift_y
 
@@ -88,8 +90,9 @@ def _write_shifted_answer_rows_pdf(
         pdf.drawRightString(column_x + layout.answer_label_width, row_y - 1, f"{row_index + 1}.")
 
         pdf.setFont("Helvetica", 7)
-        for option_index in range(5):
+        for option_index in range(option_count):
             center_x, center_y = layout.answer_option_center(0, row_index, option_index)
+            center_x += shift_x
             center_y += shift_y
             pdf.circle(center_x, center_y, layout.bubble_radius)
             pdf.drawCentredString(center_x, center_y + 6, OPTION_LABELS[option_index])
@@ -99,7 +102,7 @@ def _write_shifted_answer_rows_pdf(
         for label in labels:
             option_index = OPTION_LABELS.index(label)
             center_x, center_y = layout.answer_option_center(0, row_index, option_index)
-            pdf.circle(center_x, center_y + shift_y, layout.bubble_radius * 0.58, stroke=0, fill=1)
+            pdf.circle(center_x + shift_x, center_y + shift_y, layout.bubble_radius * 0.58, stroke=0, fill=1)
 
     for column_index, digit in enumerate(student_id):
         center_x, center_y = layout.student_id_bubble_center(column_index, int(digit))
@@ -492,6 +495,38 @@ def test_grade_translated_answered_sample_pdf(sample_pdfs: dict[str, Path]) -> N
         "1": ["B"],
         "2": ["B", "D"],
     }
+
+
+def test_grade_four_choice_sheet_with_shifted_answer_bubbles_does_not_create_e_marks(generated_tmp_dir: Path) -> None:
+    layout = PageLayout()
+    base_pdf = generated_tmp_dir / "base.pdf"
+    shifted_pdf = generated_tmp_dir / "shifted-four-choice.pdf"
+    generate_omr_sheet(
+        SheetConfig(
+            question_count=10,
+            choice_count=4,
+            exam_set_id=TEST_EXAM_SET_ID,
+            variant_id=TEST_VARIANT_ID,
+        ),
+        base_pdf,
+    )
+    _write_shifted_answer_rows_pdf(
+        source_pdf=base_pdf,
+        target_pdf=shifted_pdf,
+        layout=layout,
+        answers={1: ["D"], 6: ["D"]},
+        student_id="00038145",
+        row_count=10,
+        shift_x=7.0,
+        option_count=4,
+    )
+
+    result = grade_pdf(shifted_pdf)
+
+    assert result.student_id == "00038145"
+    assert result.marked_answers["1"] == ["D"]
+    assert result.marked_answers["6"] == ["D"]
+    assert all("E" not in labels for labels in result.marked_answers.values())
 
 
 def test_grade_pdf_writes_annotated_output(
