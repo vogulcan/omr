@@ -226,7 +226,7 @@ def _build_annotation_overlay(
             pdf=pdf,
             layout=layout,
             correct_answers=correct_answers,
-            detected_questions=set(marked_answers),
+            marked_answers=marked_answers,
             alignment=alignment,
             page_width=page_width,
             page_height=page_height,
@@ -288,7 +288,7 @@ def _draw_correct_answer_overlay(
     pdf: canvas.Canvas,
     layout: PageLayout,
     correct_answers: dict[str, list[str]],
-    detected_questions: set[str],
+    marked_answers: dict[str, list[str]],
     alignment: _AlignedSheet | None,
     page_width: float,
     page_height: float,
@@ -303,10 +303,8 @@ def _draw_correct_answer_overlay(
             row_offsets = _answer_row_offsets(answer_binary, layout, answer_rows, option_count)
 
     pdf.saveState()
-    pdf.setFillColor(Color(1, 0, 0, alpha=0.14))
-    pdf.setStrokeColor(Color(1, 0, 0, alpha=0.28))
     for question_key, labels in correct_answers.items():
-        if question_key not in detected_questions:
+        if question_key not in marked_answers:
             continue
         try:
             question_number = int(question_key)
@@ -319,6 +317,12 @@ def _draw_correct_answer_overlay(
         row_index = placement_index % layout.questions_per_column
         if column_index >= layout.answer_columns_per_page:
             continue
+        fill_color, stroke_color = _outcome_colors(
+            correct_labels=labels,
+            marked_labels=marked_answers.get(question_key, []),
+        )
+        pdf.setFillColor(fill_color)
+        pdf.setStrokeColor(stroke_color)
         for label in labels:
             if label not in OPTION_LABELS:
                 continue
@@ -354,6 +358,18 @@ def _draw_correct_answer_overlay(
                 )
             pdf.circle(center_x, center_y, bubble_radius, stroke=1, fill=1)
     pdf.restoreState()
+
+
+def _outcome_colors(
+    *,
+    correct_labels: list[str],
+    marked_labels: list[str],
+) -> tuple[Color, Color]:
+    if not marked_labels:
+        return Color(0, 0.35, 1, alpha=0.14), Color(0, 0.35, 1, alpha=0.32)
+    if sorted(marked_labels) == sorted(correct_labels):
+        return Color(0, 0.6, 0, alpha=0.18), Color(0, 0.5, 0, alpha=0.36)
+    return Color(1, 0, 0, alpha=0.14), Color(1, 0, 0, alpha=0.28)
 
 
 def _layout_point_to_source_raster_point(
@@ -663,7 +679,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", required=True, help="Annotated PDF output path or directory.")
     parser.add_argument(
         "--correct-answers",
-        help="Optional answer key as inline JSON or a path to a JSON file. Correct answers are watermarked in faint red.",
+        help="Optional answer key as inline JSON or a path to a JSON file. The key bubble for each question is watermarked: green if the student's mark matches, red if it differs, blue if blank.",
     )
     return parser
 

@@ -672,12 +672,12 @@ def test_correct_answer_overlay_snaps_to_shifted_answer_bubbles(generated_tmp_di
     blue = patch[:, :, 0].astype(int)
     green = patch[:, :, 1].astype(int)
     red = patch[:, :, 2].astype(int)
-    mask = (red > green + 15) & (red > blue + 15)
-    red_y, red_x = mask.nonzero()
+    mask = (green > red + 15) & (green > blue + 15)
+    overlay_y, overlay_x = mask.nonzero()
 
-    assert len(red_x) > 0
-    assert abs(float(red_x.mean() - 10)) <= 1.0
-    assert abs(float(red_y.mean() - 10)) <= 1.0
+    assert len(overlay_x) > 0
+    assert abs(float(overlay_x.mean() - 10)) <= 1.0
+    assert abs(float(overlay_y.mean() - 10)) <= 1.0
 
 
 def test_answer_row_refinement_prefers_bubble_row_over_option_labels() -> None:
