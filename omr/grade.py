@@ -748,7 +748,7 @@ def _answer_row_candidate_centers(
         if not 0.55 <= aspect_ratio <= 1.65:
             continue
         center_x = x0 + x + (width / 2.0)
-        center_y = y0 + y + (height / 2.0)
+        center_y = y0 + y + height - radius_px
         candidate_centers.append((center_x, center_y))
 
     return sorted(candidate_centers)
