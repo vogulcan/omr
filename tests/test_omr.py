@@ -630,12 +630,13 @@ def test_correct_answer_overlay_snaps_to_shifted_answer_bubbles(generated_tmp_di
     base_pdf = generated_tmp_dir / "base.pdf"
     shifted_pdf = generated_tmp_dir / "shifted.pdf"
     annotated_pdf = generated_tmp_dir / "shifted-annotated.pdf"
+    shift_x = 14.0
     shift_y = -4.0
 
     generate_omr_sheet(
         SheetConfig(
-            question_count=10,
-            choice_count=5,
+            question_count=20,
+            choice_count=4,
             exam_set_id=TEST_EXAM_SET_ID,
             variant_id=TEST_VARIANT_ID,
         ),
@@ -645,25 +646,27 @@ def test_correct_answer_overlay_snaps_to_shifted_answer_bubbles(generated_tmp_di
         source_pdf=base_pdf,
         target_pdf=shifted_pdf,
         layout=layout,
-        answers={1: ["B"]},
+        answers={20: ["A"]},
         student_id="00038145",
-        row_count=10,
+        row_count=20,
+        shift_x=shift_x,
         shift_y=shift_y,
+        option_count=4,
     )
 
     result = annotate_pdf(
         shifted_pdf,
         output_path=annotated_pdf,
-        correct_answers={"1": ["B"]},
+        correct_answers={"20": ["A"]},
     )
 
-    assert "B" in result.marked_answers["1"]
+    assert result.marked_answers["20"] == ["A"]
 
     image = _rasterize_pdf_page(annotated_pdf)
-    center_x_pt, center_y_pt = layout.answer_option_center(0, 0, OPTION_LABELS.index("B"))
+    center_x_pt, center_y_pt = layout.answer_option_center(0, 19, OPTION_LABELS.index("A"))
     scale_x = image.shape[1] / layout.page_width
     scale_y = image.shape[0] / layout.page_height
-    center_x = int(round(center_x_pt * scale_x))
+    center_x = int(round((center_x_pt + shift_x) * scale_x))
     center_y = int(round(image.shape[0] - ((center_y_pt + shift_y) * scale_y)))
     patch = image[max(0, center_y - 10) : center_y + 11, max(0, center_x - 10) : center_x + 11]
     blue = patch[:, :, 0].astype(int)

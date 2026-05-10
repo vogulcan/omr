@@ -12,7 +12,15 @@ from pypdf import PdfReader, PdfWriter
 from reportlab.lib.colors import Color
 from reportlab.pdfgen import canvas
 
-from .grade import GradeResult, _AlignedSheet, _grade_pdf_with_alignment
+from .grade import (
+    GradeResult,
+    _AlignedSheet,
+    _answer_row_offsets,
+    _detect_answer_rows,
+    _grade_pdf_with_alignment,
+    _infer_sheet_option_count,
+    _threshold_image,
+)
 from .layout import OPTION_LABELS, PageLayout
 from .pdf_fonts import PdfFontSet, get_pdf_fonts
 
@@ -286,6 +294,13 @@ def _draw_correct_answer_overlay(
     page_height: float,
 ) -> None:
     bubble_radius = _overlay_bubble_radius(layout, page_width, page_height)
+    row_offsets: dict[tuple[int, int], tuple[float, float]] = {}
+    if alignment is not None:
+        answer_binary = _threshold_image(alignment.answer_aligned_image)
+        answer_rows = _detect_answer_rows(answer_binary, layout)
+        if answer_rows:
+            option_count = _infer_sheet_option_count(answer_binary, layout, answer_rows)
+            row_offsets = _answer_row_offsets(answer_binary, layout, answer_rows, option_count)
 
     pdf.saveState()
     pdf.setFillColor(Color(1, 0, 0, alpha=0.14))
@@ -309,6 +324,9 @@ def _draw_correct_answer_overlay(
                 continue
             option_index = OPTION_LABELS.index(label)
             center_x, center_y = layout.answer_option_center(column_index, row_index, option_index)
+            offset_x, offset_y = row_offsets.get((column_index, row_index), (0.0, 0.0))
+            center_x += offset_x
+            center_y += offset_y
             if alignment is not None:
                 source_x, source_y = _layout_point_to_source_raster_point(
                     layout=layout,
@@ -324,6 +342,8 @@ def _draw_correct_answer_overlay(
                     option_index=option_index,
                     center_x=source_x,
                     center_y=source_y,
+                    offset_x=offset_x,
+                    offset_y=offset_y,
                 )
                 center_x, center_y = _source_raster_point_to_pdf_point(
                     alignment=alignment,
@@ -379,12 +399,16 @@ def _refine_source_answer_option_center(
     option_index: int,
     center_x: float,
     center_y: float,
+    offset_x: float = 0.0,
+    offset_y: float = 0.0,
 ) -> tuple[float, float]:
     image = alignment.source_image
     radius_px = _source_bubble_radius(layout, alignment)
     expected_centers: list[tuple[float, float]] = []
     for index in range(len(OPTION_LABELS)):
         option_center_x, option_center_y = layout.answer_option_center(column_index, row_index, index)
+        option_center_x += offset_x
+        option_center_y += offset_y
         expected_centers.append(
             _layout_point_to_source_raster_point(
                 layout=layout,
