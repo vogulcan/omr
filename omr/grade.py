@@ -31,7 +31,7 @@ ANSWER_COLUMN_ALIGNMENT_STEP_PT = 0.5
 ANSWER_COLUMN_ALIGNMENT_LOWER_QUANTILE_WEIGHT = 0.25
 ANSWER_ROW_CONTOUR_SEARCH_PADDING_PT = 12.0
 ANSWER_ROW_CONTOUR_MIN_SIZE_RATIO = 1.05
-ANSWER_ROW_CONTOUR_MAX_SIZE_RATIO = 3.50
+ANSWER_ROW_CONTOUR_MAX_SIZE_RATIO = 4.20
 ANSWER_ROW_CONTOUR_MIN_AREA_RATIO = 0.30
 STUDENT_ID_MIN_SCORE = 0.25
 STUDENT_ID_DOMINANCE_RATIO = 1.8
@@ -681,6 +681,10 @@ def _answer_row_contour_offset(
     if len(candidate_centers) < option_count:
         return None
 
+    candidate_centers = _select_row_cluster(candidate_centers, center_y_px, radius_px, option_count)
+    if candidate_centers is None:
+        return None
+
     expected_x = np.array(expected_centers_px, dtype=np.float32)
     expected_y = np.array([center_y_px] * option_count, dtype=np.float32)
     best_offset_px: tuple[float, float] | None = None
@@ -707,6 +711,30 @@ def _answer_row_contour_offset(
     return offset_x_pt, offset_y_pt
 
 
+def _select_row_cluster(
+    candidates: list[tuple[float, float]],
+    expected_y_px: float,
+    radius_px: float,
+    option_count: int,
+) -> list[tuple[float, float]] | None:
+    if not candidates:
+        return None
+    y_tolerance = radius_px * 1.2
+    sorted_by_y = sorted(candidates, key=lambda point: point[1])
+    clusters: list[list[tuple[float, float]]] = []
+    for cand in sorted_by_y:
+        if clusters:
+            cluster_y = float(np.median([p[1] for p in clusters[-1]]))
+            if abs(cand[1] - cluster_y) <= y_tolerance:
+                clusters[-1].append(cand)
+                continue
+        clusters.append([cand])
+    valid = [c for c in clusters if len(c) >= option_count]
+    if not valid:
+        return None
+    return min(valid, key=lambda c: abs(float(np.median([p[1] for p in c])) - expected_y_px))
+
+
 def _answer_row_candidate_centers(
     binary: np.ndarray,
     layout: PageLayout,
@@ -723,18 +751,22 @@ def _answer_row_candidate_centers(
         *layout.answer_option_center(column_index, row_index, 0),
     )
     search_padding_px = ANSWER_ROW_CONTOUR_SEARCH_PADDING_PT * (binary.shape[1] / layout.page_width)
+    row_pitch_px = layout.answer_row_height * (binary.shape[0] / layout.page_height)
+    y_search_radius_px = max(radius_px * 1.6, row_pitch_px * 0.85)
     x0 = max(0, int(floor(expected_centers_px[0] - search_padding_px - (radius_px * 1.5))))
     x1 = min(binary.shape[1], int(ceil(expected_centers_px[-1] + search_padding_px + (radius_px * 1.5))))
-    y0 = max(0, int(floor(center_y_px - (radius_px * 1.6))))
-    y1 = min(binary.shape[0], int(ceil(center_y_px + (radius_px * 1.6))))
+    y0 = max(0, int(floor(center_y_px - y_search_radius_px)))
+    y1 = min(binary.shape[0], int(ceil(center_y_px + y_search_radius_px)))
     if x1 <= x0 or y1 <= y0:
         return []
 
     roi = binary[y0:y1, x0:x1]
+    roi_height = y1 - y0
     contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     min_size = radius_px * ANSWER_ROW_CONTOUR_MIN_SIZE_RATIO
     max_size = radius_px * ANSWER_ROW_CONTOUR_MAX_SIZE_RATIO
     min_area = max(20.0, (radius_px**2) * ANSWER_ROW_CONTOUR_MIN_AREA_RATIO)
+    min_full_height = radius_px * 1.7
     candidate_centers: list[tuple[float, float]] = []
 
     for contour in contours:
@@ -746,6 +778,8 @@ def _answer_row_candidate_centers(
             continue
         aspect_ratio = width / height if height else 0.0
         if not 0.55 <= aspect_ratio <= 1.65:
+            continue
+        if height < min_full_height and (y == 0 or y + height >= roi_height):
             continue
         center_x = x0 + x + (width / 2.0)
         center_y = y0 + y + height - radius_px
