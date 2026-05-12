@@ -11,6 +11,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from pypdf import PdfReader
 
 from .layout import OPTION_LABELS, STUDENT_ID_COLUMNS, STUDENT_ID_ROWS, PageLayout
 
@@ -96,10 +97,11 @@ def grade_pdf(
 def _grade_pdf_with_alignment(
     pdf_path: str | Path,
     layout: PageLayout | None = None,
+    page: int = 1,
 ) -> tuple[GradeResult, _AlignedSheet]:
     layout = layout or PageLayout()
     pdf_path = Path(pdf_path)
-    image = _rasterize_pdf_page(pdf_path)
+    image = _rasterize_pdf_page(pdf_path, page=page)
     try:
         aligned_sheet = _align_image_to_layout(image, layout)
     except UnsupportedSheetError as exc:
@@ -127,6 +129,44 @@ def _grade_pdf_with_alignment(
     )
 
 
+def grade_pdf_pages(
+    pdf_path: str | Path,
+    layout: PageLayout | None = None,
+) -> list[BatchGradeResult]:
+    pdf_path = Path(pdf_path)
+    page_count = _get_pdf_page_count(pdf_path)
+    results: list[BatchGradeResult] = []
+    for page_index in range(1, page_count + 1):
+        if page_count == 1:
+            source_name = pdf_path.name
+            error_prefix = str(pdf_path)
+        else:
+            source_name = f"{pdf_path.name}#p{page_index}"
+            error_prefix = f"{pdf_path}#p{page_index}"
+        try:
+            result, _ = _grade_pdf_with_alignment(pdf_path, layout=layout, page=page_index)
+            results.append(
+                BatchGradeResult(
+                    source_pdf=source_name,
+                    qr_data=result.qr_data,
+                    student_id=result.student_id,
+                    marked_answers=result.marked_answers,
+                    omr_error=f"{error_prefix}: {result.omr_error}" if result.omr_error else "",
+                )
+            )
+        except Exception as exc:
+            results.append(
+                BatchGradeResult(
+                    source_pdf=source_name,
+                    qr_data=None,
+                    student_id="",
+                    marked_answers={},
+                    omr_error=str(exc),
+                )
+            )
+    return results
+
+
 def grade_path(
     path: str | Path,
     layout: PageLayout | None = None,
@@ -134,6 +174,8 @@ def grade_path(
     target = Path(path)
     if target.is_dir():
         return grade_directory(target, layout=layout)
+    if _get_pdf_page_count(target) > 1:
+        return grade_pdf_pages(target, layout=layout)
     return grade_pdf(target, layout=layout)
 
 
@@ -145,31 +187,17 @@ def grade_directory(
     pdf_paths = sorted(path for path in target_dir.iterdir() if path.is_file() and path.suffix.lower() == ".pdf")
     results: list[BatchGradeResult] = []
     for pdf_path in pdf_paths:
-        try:
-            result = grade_pdf(pdf_path, layout=layout)
-            results.append(
-                BatchGradeResult(
-                    source_pdf=pdf_path.name,
-                    qr_data=result.qr_data,
-                    student_id=result.student_id,
-                    marked_answers=result.marked_answers,
-                    omr_error=f"{pdf_path}: {result.omr_error}" if result.omr_error else "",
-                )
-            )
-        except Exception as exc:
-            results.append(
-                BatchGradeResult(
-                    source_pdf=pdf_path.name,
-                    qr_data=None,
-                    student_id="",
-                    marked_answers={},
-                    omr_error=str(exc),
-                )
-            )
+        results.extend(grade_pdf_pages(pdf_path, layout=layout))
     return results
 
 
-def _rasterize_pdf_page(pdf_path: Path, dpi: int = 200) -> np.ndarray:
+def _get_pdf_page_count(pdf_path: Path) -> int:
+    with pdf_path.open("rb") as handle:
+        reader = PdfReader(handle)
+        return len(reader.pages)
+
+
+def _rasterize_pdf_page(pdf_path: Path, dpi: int = 200, page: int = 1) -> np.ndarray:
     with tempfile.TemporaryDirectory(prefix="omr-grade-") as temp_dir:
         output_prefix = Path(temp_dir) / "page"
         subprocess.run(
@@ -179,7 +207,7 @@ def _rasterize_pdf_page(pdf_path: Path, dpi: int = 200) -> np.ndarray:
                 "-r",
                 str(dpi),
                 "-f",
-                "1",
+                str(page),
                 "-singlefile",
                 str(pdf_path),
                 str(output_prefix),

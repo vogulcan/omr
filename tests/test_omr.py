@@ -35,6 +35,7 @@ from omr.grade import (
     grade_directory,
     grade_path,
     grade_pdf,
+    grade_pdf_pages,
 )
 from omr.generator import DUMMY_QR_DATA, dummy_qr_payload, generate_omr_sheet
 from omr.layout import MAX_QUESTIONS_PER_PAGE, OPTION_LABELS, STUDENT_ID_COLUMNS, STUDENT_ID_ROWS, PageLayout, paginate_questions
@@ -471,6 +472,56 @@ def test_grade_path_accepts_directory(generated_tmp_dir: Path, sample_pdfs: dict
     assert isinstance(result, list)
     assert len(result) == 1
     assert result[0].source_pdf == "student-a.pdf"
+
+
+def _concatenate_pdfs(target_pdf: Path, source_pdfs: list[Path]) -> None:
+    writer = PdfWriter()
+    for source in source_pdfs:
+        reader = PdfReader(str(source))
+        for page in reader.pages:
+            writer.add_page(page)
+    with target_pdf.open("wb") as handle:
+        writer.write(handle)
+
+
+def test_grade_path_expands_multi_page_pdf(generated_tmp_dir: Path, sample_pdfs: dict[str, Path]) -> None:
+    combined_pdf = generated_tmp_dir / "combined.pdf"
+    _concatenate_pdfs(combined_pdf, [sample_pdfs["sample_answered"], sample_pdfs["answer1"]])
+
+    result = grade_path(combined_pdf)
+
+    assert isinstance(result, list)
+    assert [item.source_pdf for item in result] == ["combined.pdf#p1", "combined.pdf#p2"]
+    assert result[0].student_id == "63620147"
+    assert result[0].marked_answers["3"] == ["B", "C"]
+    assert result[0].omr_error == ""
+    assert result[1].student_id == "01345072"
+    assert result[1].marked_answers["3"] == ["B", "D"]
+    assert result[1].omr_error == ""
+
+
+def test_grade_pdf_pages_single_page_preserves_filename(sample_pdfs: dict[str, Path]) -> None:
+    result = grade_pdf_pages(sample_pdfs["sample_answered"])
+
+    assert len(result) == 1
+    assert result[0].source_pdf == sample_pdfs["sample_answered"].name
+    assert result[0].student_id == "63620147"
+
+
+def test_grade_directory_expands_multi_page_pdfs(generated_tmp_dir: Path, sample_pdfs: dict[str, Path]) -> None:
+    shutil.copy(sample_pdfs["sample_answered"], generated_tmp_dir / "student-a.pdf")
+    _concatenate_pdfs(
+        generated_tmp_dir / "combined.pdf",
+        [sample_pdfs["sample_answered"], sample_pdfs["answer1"]],
+    )
+
+    results = grade_directory(generated_tmp_dir)
+
+    assert [item.source_pdf for item in results] == [
+        "combined.pdf#p1",
+        "combined.pdf#p2",
+        "student-a.pdf",
+    ]
 
 
 def test_grade_rotated_answered_sample_pdf(sample_pdfs: dict[str, Path]) -> None:
